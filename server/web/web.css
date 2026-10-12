@@ -30,7 +30,16 @@ body.web #toast { position: fixed; bottom: 20px; right: 50%; transform: translat
   flex: 1; overflow: auto; margin: 0; padding: 12px; border-radius: 12px; background: #0f1013;
   border: 1px solid rgba(255, 255, 255, .05); color: #d6d8dc; font: 12px/1.45 var(--mono); white-space: pre; user-select: text;
 }
+#sheet pre.wrap { white-space: pre-wrap; word-break: break-word; overflow-x: hidden; }
+#sheet pre { touch-action: pan-x pan-y; }
+#sheet .bar button.on { background: #2f7cf6; border-color: #2f7cf6; color: #fff; }
 #sheet .send { display: flex; gap: 8px; margin-top: 10px; }
+@media (max-width: 700px) {
+  #sheet .bar { gap: 4px; }
+  #sheet .bar button { min-width: 30px; padding: 0 7px; }
+  /* 16px+ stops iOS from zooming the page when an input is focused */
+  #sheet input, #sheet select, .reply input { font-size: 16px; }
+}
 #sheet input, #sheet select {
   flex: 1; height: 42px; border-radius: 11px; border: 1px solid rgba(255, 255, 255, .07); background: #1b1c20;
   color: #eeeff1; padding: 0 12px; font: inherit; font-size: 14px; outline: 0; min-width: 0;

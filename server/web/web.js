@@ -57,6 +57,12 @@
   document.body.appendChild(sheet);
   let viewing = null;
   let timer = null;
+  let raw = '';
+  // Terminals are ~200 columns; a phone shows ~45 at a readable size. So on narrow
+  // screens wrap lines by default, and let font size be set with A-/A+ or a pinch.
+  const narrow = window.matchMedia('(max-width: 700px)').matches;
+  let wrap = store.get('wrap', narrow);
+  let fontPx = store.get('fontPx', narrow ? 10.5 : 12);
 
   function closeSheet() {
     sheet.classList.remove('show');
@@ -64,23 +70,53 @@
     clearInterval(timer);
   }
 
+  // Terminal padding is noise when wrapped: trailing spaces, huge gaps, full-width rules.
+  function tidy(text) {
+    let lines = text.replace(/\s+$/, '').split('\n').map((l) => l.replace(/\s+$/, ''));
+    if (wrap) lines = lines.map((l) => l.replace(/([─━═╌]{24})[─━═╌]+/g, '$1').replace(/(\S) {6,}(?=\S)/g, '$1   '));
+    return lines.join('\n');
+  }
+
+  function applyView() {
+    const pre = sheet.querySelector('pre');
+    if (!pre) return;
+    pre.classList.toggle('wrap', wrap);
+    pre.style.fontSize = `${fontPx}px`;
+    const w = sheet.querySelector('[data-wrap]');
+    if (w) w.classList.toggle('on', wrap);
+  }
+
+  function render(stick) {
+    const pre = sheet.querySelector('pre');
+    if (!pre) return;
+    const atBottom = stick || pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 30;
+    pre.textContent = tidy(raw);
+    if (atBottom) pre.scrollTop = pre.scrollHeight;
+  }
+
   async function refresh() {
     if (!viewing) return;
     try {
-      const { text } = await call('GET', `api/panes/${enc(viewing)}/screen?lines=300`);
-      const pre = sheet.querySelector('pre');
-      const atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 30;
-      pre.textContent = text.replace(/\s+$/, '');
-      if (atBottom) pre.scrollTop = pre.scrollHeight;
+      raw = (await call('GET', `api/panes/${enc(viewing)}/screen?lines=300`)).text;
+      render();
     } catch (e) { sheet.querySelector('pre').textContent = `(${e.message})`; }
+  }
+
+  function setFont(px) {
+    fontPx = Math.max(6, Math.min(22, Math.round(px * 2) / 2));
+    store.set('fontPx', fontPx);
+    applyView();
   }
 
   function viewer(key) {
     const p = last.panes.find((x) => x.key === key);
     const name = p ? `${p.kind || 'shell'} · ${p.label}` : key.split('|').slice(1).join(' ');
     viewing = key;
+    raw = '';
     sheet.innerHTML = `
       <div class="bar"><b></b><span class="sp"></span>
+        <button data-zoom="-1" title="Smaller text">A−</button><button data-zoom="1" title="Larger text">A+</button>
+        <button data-wrap title="Wrap long lines">wrap</button>
         <button data-k="Escape" title="Esc">esc</button><button data-k="C-c" title="Ctrl+C">^C</button>
         <button data-focus title="Select this pane in its tmux session">focus</button>
         <button data-close title="Close">✕</button></div>
@@ -88,16 +124,34 @@
       <form class="send"><input placeholder="Type into this pane…  (Enter sends)" spellcheck="false" autocomplete="off"><button>↵</button></form>`;
     sheet.querySelector('b').textContent = name;
     sheet.classList.add('show');
+    applyView();
+    pinch(sheet.querySelector('pre'));
     call('POST', `api/panes/${enc(key)}/seen`).catch(() => {});
     refresh();
     clearInterval(timer);
     timer = setInterval(refresh, 1500);
   }
 
+  // two-finger pinch on the pane text scales its font instead of the page
+  function pinch(pre) {
+    let start = 0;
+    let base = fontPx;
+    const dist = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+    pre.addEventListener('touchstart', (e) => { if (e.touches.length === 2) { start = dist(e.touches); base = fontPx; } }, { passive: true });
+    pre.addEventListener('touchmove', (e) => {
+      if (e.touches.length !== 2 || !start) return;
+      e.preventDefault();
+      setFont(base * (dist(e.touches) / start));
+    }, { passive: false });
+    pre.addEventListener('touchend', () => { start = 0; });
+  }
+
   sheet.addEventListener('click', async (e) => {
     const t = e.target.closest('button');
     if (!t || !viewing) return;
     if (t.dataset.close !== undefined) return closeSheet();
+    if (t.dataset.zoom) return setFont(fontPx + Number(t.dataset.zoom));
+    if (t.dataset.wrap !== undefined) { wrap = !wrap; store.set('wrap', wrap); applyView(); return render(true); }
     try {
       if (t.dataset.k) await call('POST', `api/panes/${enc(viewing)}/keys`, { keys: [t.dataset.k] });
       else if (t.dataset.focus !== undefined) { await call('POST', `api/panes/${enc(viewing)}/focus`); toast('Selected in tmux'); }
