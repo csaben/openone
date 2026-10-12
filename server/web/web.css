@@ -1,5 +1,5 @@
 /* Web build: the edge panel becomes the page. Same card, rail and colors as desktop. */
-body.web { background: #0b0c0e; overflow: hidden; user-select: auto; }
+body.web { background: #0b0c0e; overflow: hidden; user-select: auto; color-scheme: dark; }
 body.web #tab, body.web #peek { display: none; }
 
 body.web #root { position: relative; inset: auto; width: min(500px, 100vw); height: 100dvh; margin: 0 auto; }
