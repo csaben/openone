@@ -50,19 +50,27 @@ class TmuxSource {
     const [list] = await this.batch([['list-panes', '-a', '-F', FMT]]);
     const panes = list.split('\n').map(parseRow).filter(Boolean);
     // Capturing is the expensive part, and on psmux each capture can flash another window
-    // in the attached client. So only re-read a pane when its scrollback/cursor moved, at
-    // most every captureEveryMs per pane (working agents change on every poll), plus a
-    // slow refresh. Real tmux doesn't flash, so it isn't throttled by default.
+    // in the attached client. So only re-read a pane when its scrollback/cursor moved (at
+    // most every captureEveryMs per pane), plus a slow refresh for in-place redraws that
+    // don't move the cursor. The refresh is staggered, one overdue pane per poll, because
+    // refreshing every pane at once flashed the terminal ~16 times in a burst.
+    // Real tmux doesn't flash, so it isn't throttled by default.
     const now = Date.now();
     const gap = this.cfg.captureEveryMs ?? (this.psmux ? 4000 : 0);
-    const refreshMs = this.cfg.refreshMs || 20000;
+    const refreshMs = this.cfg.refreshMs || (this.psmux ? 45000 : 20000);
+    const perPoll = this.cfg.refreshPerPoll ?? (this.psmux ? 1 : Infinity);
     const stale = [];
+    const overdue = [];
     for (const p of panes) {
       const c = this.cache.get(`${p.session}|${p.paneId}`);
       const age = c ? now - c.at : Infinity;
-      if (c && age < refreshMs && (c.sig === p.sig || age < gap)) p.text = c.text;
-      else stale.push(p);
+      if (!c || (c.sig !== p.sig && age >= gap)) stale.push(p);
+      else {
+        p.text = c.text;
+        if (age >= refreshMs) overdue.push([age, p]);
+      }
     }
+    overdue.sort((a, b) => b[0] - a[0]).slice(0, perPoll).forEach(([, p]) => stale.push(p));
     const n = this.cfg.lines || 60;
     const texts = stale.length ? await this.batch(stale.map((p) => ['capture-pane', '-p', '-J', '-S', `-${n}`, '-t', this.target(p)])) : [];
     stale.forEach((p, i) => {
