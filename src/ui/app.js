@@ -1,6 +1,9 @@
 const $ = (s) => document.querySelector(s);
 const root = $('#root');
 const body = $('#card-body');
+// served by the openone server: the panel is the whole page and never collapses
+const WEB = document.body.classList.contains('web');
+const OPEN_HINT = WEB ? 'show pane' : 'open in terminal';
 
 let S = { panes: [], hosts: [], muted: false };
 let expanded = false;
@@ -116,7 +119,7 @@ function inboxCard(items) {
   const n = (p.options || []).length;
   const hint = p.state === 'input' && n
     ? `Press ${n <= 3 ? (p.options.map((o) => `<kbd>${o.n}</kbd>`).join(n === 3 ? ', ' : ' or ').replace(/, (?=[^,]*$)/, ' or ')) : `<kbd>1</kbd> – <kbd>${n}</kbd>`} to answer`
-    : `<kbd>Enter</kbd> open in terminal${items.length > 1 ? ' · <kbd>Tab</kbd> next' : ''}`;
+    : `<kbd>Enter</kbd> ${OPEN_HINT}${items.length > 1 ? ' · <kbd>Tab</kbd> next' : ''}`;
   return { html, hint };
 }
 
@@ -142,7 +145,7 @@ function agentsCard() {
     return head + (rows || (h.ok ? '<div class="empty">No panes</div>' : ''));
   }).join('');
   const html = `<div class="head"><h1>Agents${parts.length ? ` <span style="color:var(--muted);font-weight:500;font-size:12.5px">· ${parts.join(' · ')}</span>` : ''}</h1><button class="x" data-close>${X}</button></div>${groups}`;
-  return { html, hint: '<kbd>↑</kbd><kbd>↓</kbd> pick · <kbd>Enter</kbd> open in terminal' };
+  return { html, hint: `<kbd>↑</kbd><kbd>↓</kbd> pick · <kbd>Enter</kbd> ${OPEN_HINT}` };
 }
 
 function render() {
@@ -191,7 +194,7 @@ function expand(v, key) {
 }
 
 function collapse() {
-  if (!expanded) return;
+  if (!expanded || WEB) return;
   expanded = false;
   root.classList.replace('expanded', 'collapsed');
   fit();
@@ -301,9 +304,12 @@ body.addEventListener('input', (e) => { if (e.target.id === 'reply' && cur) draf
 
 document.addEventListener('keydown', (e) => {
   if (!expanded) return;
+  // keys belong to the web build's overlays (pane viewer, forms) while they're open
+  if (e.target.closest && e.target.closest('#sheet, #webmenu')) return;
+  if (WEB && document.querySelector('#sheet.show')) return;
   const typing = e.target.tagName === 'INPUT';
   if (e.key === 'Escape') { if (typing) e.target.blur(); else collapse(); return; }
-  if (typing) { if (e.key === 'Enter') sendReply(); return; }
+  if (typing) { if (e.key === 'Enter' && e.target.id === 'reply') sendReply(); return; }
   const p = view === 'inbox' && inbox().length ? find(cur) : null;
   if (p && p.state === 'input' && /^[1-9]$/.test(e.key) && (p.options || []).some((o) => o.n === Number(e.key))) {
     answer(p.key, Number(e.key));

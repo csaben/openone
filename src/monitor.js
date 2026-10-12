@@ -5,7 +5,7 @@
 const path = require('path');
 const { detect } = require('./detect');
 
-const GENERIC = /^(claude|codex|node|bash|zsh|sh|fish|pwsh|powershell|cmd|tmux|psmux|trident)(\.exe.*)?$/i;
+const GENERIC = /^(claude|codex|node|bash|zsh|sh|fish|pwsh|powershell|cmd|tmux|psmux|trident)([.-].*)?$/i;
 const SPIN = /^[\s✳✻✶✢✽·*⠁-⣿]+/;
 
 function label(raw) {

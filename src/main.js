@@ -5,6 +5,7 @@ const path = require('path');
 const { Monitor } = require('./monitor');
 const { createSource } = require('./sources');
 const { WindowsTerminal } = require('./wt');
+const actions = require('./actions');
 const { detect: detectConfig } = require('./setup');
 
 // Installed builds keep config in %APPDATA%\openone; a source checkout uses ./config.json.
@@ -185,7 +186,7 @@ async function jump(key) {
 async function answer(key, n) {
   const r = lookup(key);
   if (!r) return;
-  await r.h.src.keys(r.p, [String(n)]);
+  await actions.answer(r.h.src, r.p, n);
   monitor.markSeen(key);
   push();
 }
@@ -193,19 +194,7 @@ async function answer(key, n) {
 async function reply(key, text) {
   const r = lookup(key);
   if (!r || !text.trim()) return;
-  const { p, h } = r;
-  if (p.state === 'input') {
-    // Esc declines the menu ("tell it what to do differently") and frees the input box
-    await h.src.keys(p, ['Escape']);
-    await sleep(350);
-  } else if (p.kind === 'claude') {
-    // one Ctrl+C clears any half-typed draft; a single press never exits Claude Code
-    await h.src.keys(p, ['C-c']);
-    await sleep(150);
-  }
-  await h.src.text(p, text);
-  await sleep(60);
-  await h.src.keys(p, ['Enter']);
+  await actions.reply(r.h.src, r.p, text);
   monitor.markSeen(key);
   push();
 }

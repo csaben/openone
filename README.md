@@ -34,6 +34,27 @@ On first run it writes `config.json` (to `%APPDATA%\openone` for an installed co
 
 **Ctrl+Alt+Space** opens the panel. In the panel, **Enter** jumps to the pane, **Tab** moves to the next item and **Esc** closes it. The tray menu has mute, start at login and config.
 
+## Server (web and phone, experimental)
+
+`server/` runs the same watcher on an always-on Linux box. It reaches every machine over ssh, serves the same panel as a web page, and exposes an HTTP API to answer agents and start new sessions. It keeps no state of its own; tmux on each machine is the source of truth.
+
+```bash
+cp server/config.example.json server/config.json    # list your hosts
+node server/index.js                                # listens on 127.0.0.1:8950
+tailscale serve --bg --https=8951 http://127.0.0.1:8950
+```
+
+Host types: `tmux` (the server machine itself), `ssh` (remote tmux) and `ssh-psmux` (remote Windows; give the full path to `psmux.exe`). It is reachable only through `tailscale serve`. Set `allow` to a list of tailnet logins to restrict it further. Anyone who can reach it can type into your shells, so never expose it publicly.
+
+| | |
+| --- | --- |
+| `GET /api/state` | hosts and every pane with its agent state |
+| `GET /api/events` | server-sent events: `state` on change, `peek` when an agent finishes or needs you |
+| `GET /api/panes/:key/screen` | current screen text |
+| `POST /api/panes/:key/answer` `{n}` · `/reply` `{text}` · `/text` `{text}` · `/keys` `{keys}` · `/focus` · `/seen` | drive a pane |
+| `POST /api/hosts/:host/sessions` `{name, cwd, cmd}` | start a detached session and type `cmd` into it |
+| `DELETE /api/hosts/:host/sessions/:name` | kill a session |
+
 ## Notes
 
 - Agent state comes from reading the screen. "esc to interrupt" means working, and a numbered menu with a cursor means waiting on you. `npm test` runs against real captured Claude Code screens.

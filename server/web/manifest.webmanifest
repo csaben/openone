@@ -1,0 +1,9 @@
+{
+  "name": "openone",
+  "short_name": "openone",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#0b0c0e",
+  "theme_color": "#0b0c0e",
+  "icons": [{ "src": "assets/app-256.png", "sizes": "256x256", "type": "image/png" }]
+}

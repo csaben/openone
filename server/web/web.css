@@ -1,0 +1,54 @@
+/* Web build: the edge panel becomes the page. Same card, rail and colors as desktop. */
+body.web { background: #0b0c0e; overflow: hidden; user-select: auto; }
+body.web #tab, body.web #peek { display: none; }
+
+body.web #root { position: relative; inset: auto; width: min(500px, 100vw); height: 100dvh; margin: 0 auto; }
+body.web #rail { top: max(20px, env(safe-area-inset-top)); right: 12px; transform: none !important; }
+body.web #card {
+  top: max(20px, env(safe-area-inset-top)); right: 64px; width: calc(100% - 76px);
+  transform: none !important;
+}
+body.web #card-body { max-height: calc(100dvh - 120px); }
+body.web #hint { right: 64px; width: calc(100% - 76px); }
+body.web #toast { position: fixed; bottom: 20px; right: 50%; transform: translateX(50%); }
+
+/* pane viewer and forms: a sheet over everything */
+#sheet {
+  position: fixed; inset: 0; z-index: 10; display: none; flex-direction: column;
+  background: rgba(8, 9, 11, .97); padding: max(12px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom));
+}
+#sheet.show { display: flex; }
+#sheet .bar { display: flex; align-items: center; gap: 6px; padding: 4px 4px 10px; }
+#sheet .bar b { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#sheet .sp { flex: 1; }
+#sheet .bar button {
+  height: 30px; min-width: 34px; padding: 0 10px; border-radius: 8px; background: #1d1e22;
+  border: 1px solid rgba(255, 255, 255, .07); color: #d9dbe0; font-size: 12px;
+}
+#sheet .bar button:hover { background: #2a2b30; }
+#sheet pre {
+  flex: 1; overflow: auto; margin: 0; padding: 12px; border-radius: 12px; background: #0f1013;
+  border: 1px solid rgba(255, 255, 255, .05); color: #d6d8dc; font: 12px/1.45 var(--mono); white-space: pre; user-select: text;
+}
+#sheet .send { display: flex; gap: 8px; margin-top: 10px; }
+#sheet input, #sheet select {
+  flex: 1; height: 42px; border-radius: 11px; border: 1px solid rgba(255, 255, 255, .07); background: #1b1c20;
+  color: #eeeff1; padding: 0 12px; font: inherit; font-size: 14px; outline: 0; min-width: 0;
+}
+#sheet input:focus { border-color: rgba(47, 124, 246, .55); }
+#sheet .send button, #sheet .go {
+  height: 42px; padding: 0 16px; border-radius: 11px; background: #2f7cf6; color: #fff; font-weight: 600; font-size: 14px;
+}
+#sheet form.new { display: flex; flex-direction: column; gap: 14px; max-width: 460px; width: 100%; margin: 8px auto; }
+#sheet form.new label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: #8d919a; }
+#sheet form.new input, #sheet form.new select { flex: none; }
+
+#webmenu {
+  position: fixed; z-index: 11; display: none; flex-direction: column; min-width: 200px; padding: 6px;
+  top: calc(max(20px, env(safe-area-inset-top)) + 230px); right: max(12px, calc(50vw - 250px + 12px));
+  background: rgba(27, 28, 32, .98); border: 1px solid rgba(255, 255, 255, .08); border-radius: 12px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, .5);
+}
+#webmenu.show { display: flex; }
+#webmenu button { text-align: left; padding: 9px 12px; border-radius: 8px; font-size: 13px; }
+#webmenu button:hover { background: rgba(255, 255, 255, .06); }
