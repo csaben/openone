@@ -96,14 +96,29 @@ class TmuxSource {
     // tmux doesn't expand ~ in -c (it silently falls back to $HOME)
     if (cwd && /^~(?=$|[\\/])/.test(cwd)) cwd = (await this.home()) + cwd.slice(1);
     const typedCd = cwd && this.cdCommand ? this.cdCommand(cwd) : '';
-    const [out] = await this.batch([['new-session', '-d', '-s', name, ...(cwd && !typedCd ? ['-c', cwd] : [])]]);
-    if (/duplicate session|already exists/i.test(out)) throw new Error(`session ${name} already exists`);
-    const [list] = await this.batch([['list-panes', '-t', name, '-F', FMT]]);
-    const pane = list.split('\n').map(parseRow).filter(Boolean)[0];
-    if (!pane) throw new Error(`could not start session: ${out.trim() || 'no pane'}`);
+    const create = async () => {
+      const [out] = await this.batch([['new-session', '-d', '-s', name, ...(cwd && !typedCd ? ['-c', cwd] : [])]]);
+      if (/duplicate session|already exists/i.test(out)) throw new Error(`session ${name} already exists`);
+      return out;
+    };
+    const find = async () => {
+      const [list] = await this.batch([['list-panes', '-t', name, '-F', FMT]]);
+      return list.split('\n').map(parseRow).filter(Boolean)[0];
+    };
+    const out = await create();
+    if (!(await find())) throw new Error(`could not start session: ${out.trim() || 'no pane'}`);
+    await new Promise((r) => setTimeout(r, this.cfg.shellWarmMs || 1200));
+    // psmux sometimes hands out a pre-started server that dies a moment later (seen right
+    // after the ssh connection is re-established); check before typing, retry once
+    let pane = await find();
+    if (!pane) {
+      await create();
+      await new Promise((r) => setTimeout(r, this.cfg.shellWarmMs || 1200));
+      pane = await find();
+      if (!pane) throw new Error('session exited right after starting');
+    }
     const line = [typedCd, cmd].filter(Boolean).join('; ');
     if (line) {
-      await new Promise((r) => setTimeout(r, this.cfg.shellWarmMs || 1200));
       await this.text(pane, line);
       await this.keys(pane, ['Enter']);
     }
