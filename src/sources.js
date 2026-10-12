@@ -49,13 +49,18 @@ class TmuxSource {
   async snapshot() {
     const [list] = await this.batch([['list-panes', '-a', '-F', FMT]]);
     const panes = list.split('\n').map(parseRow).filter(Boolean);
-    // Capturing is the expensive part (and on psmux it can flash the attached client),
-    // so only re-read a pane when its scrollback/cursor moved, plus a slow refresh.
+    // Capturing is the expensive part, and on psmux each capture can flash another window
+    // in the attached client. So only re-read a pane when its scrollback/cursor moved, at
+    // most every captureEveryMs per pane (working agents change on every poll), plus a
+    // slow refresh. Real tmux doesn't flash, so it isn't throttled by default.
     const now = Date.now();
+    const gap = this.cfg.captureEveryMs ?? (this.psmux ? 4000 : 0);
+    const refreshMs = this.cfg.refreshMs || 20000;
     const stale = [];
     for (const p of panes) {
       const c = this.cache.get(`${p.session}|${p.paneId}`);
-      if (c && c.sig === p.sig && now - c.at < (this.cfg.refreshMs || 20000)) p.text = c.text;
+      const age = c ? now - c.at : Infinity;
+      if (c && age < refreshMs && (c.sig === p.sig || age < gap)) p.text = c.text;
       else stale.push(p);
     }
     const n = this.cfg.lines || 60;
@@ -138,6 +143,8 @@ class LocalSource extends TmuxSource {
     super(cfg);
     this.bin = cfg.bin || (cfg.type === 'tmux' ? 'tmux' : 'psmux');
   }
+
+  get psmux() { return /psmux/i.test(this.bin); }
 
   async home() { return require('os').homedir(); }
 
@@ -282,6 +289,8 @@ const CLEAN_PATH = "(([Environment]::GetEnvironmentVariable('Path','Machine') + 
   'Select-Object -Unique) -join \';\'';
 
 class SshPsmuxSource extends ShellSource {
+  get psmux() { return true; }
+
   get remoteShell() { return 'cmd /q'; }
 
   get homeCommand() { return 'echo %USERPROFILE%'; }
