@@ -45,14 +45,18 @@ function pushState() {
   broadcast('state', JSON.parse(s));
 }
 
+async function refresh(h) {
+  const raws = await h.src.snapshot();
+  h.ok = true;
+  h.error = '';
+  for (const ev of monitor.ingest(h.cfg.name, raws)) broadcast('peek', ev);
+  pushState();
+}
+
 async function poll(h) {
   for (;;) {
     try {
-      const raws = await h.src.snapshot();
-      h.ok = true;
-      h.error = '';
-      for (const ev of monitor.ingest(h.cfg.name, raws)) broadcast('peek', ev);
-      pushState();
+      await refresh(h);
       await sleep(h.cfg.pollMs || 1500);
     } catch (e) {
       h.ok = false;
@@ -174,6 +178,7 @@ async function api(req, res, parts) {
     if (m === 'POST' && !d) {
       const body = await readJson(req);
       const np = await h.src.newSession({ name: String(body.name || ''), cwd: body.cwd ? String(body.cwd) : '', cmd: body.cmd ? String(body.cmd) : '' });
+      await refresh(h); // so the new pane is addressable right away, not after the next poll
       return send(res, 201, { host: h.cfg.name, session: np.session, paneId: np.paneId, key: `${h.cfg.name}|${np.session}|${np.paneId}` });
     }
     if (m === 'DELETE' && d) {

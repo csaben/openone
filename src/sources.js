@@ -185,7 +185,11 @@ class ShellSource extends TmuxSource {
       this.connect();
       if (!this.proc) throw new Error('ssh not running');
       // shell setup gets its own round trip so its noise never lands in real output
-      if (!this.ready) { this.ready = true; await this.raw(this.init()); }
+      if (!this.ready) {
+        this.ready = true;
+        await this.raw(this.init());
+        await this.setup();
+      }
       return this.raw(lines);
     };
     const p = this.chain.then(run, run);
@@ -228,6 +232,8 @@ class ShellSource extends TmuxSource {
 
   clean(s) { return s; }
 
+  async setup() {}
+
   async home() {
     if (!this.homeDir) this.homeDir = this.clean(await this.exec([this.homeCommand])).trim().split(/\r?\n/).pop().trim();
     return this.homeDir;
@@ -248,15 +254,29 @@ class SshTmuxSource extends ShellSource {
   render(argv) { return `tmux ${argv.map(sq).join(' ')} </dev/null 2>&1`; }
 }
 
-// Windows over ssh. PowerShell and PATH lookups can stall for minutes in an ssh logon
-// (a dead \\wsl$ entry in PATH blocks the search), so this drives cmd.exe with a
-// minimal PATH and calls psmux by full path.
+// Windows over ssh. In an ssh logon, PATH lookups can stall for minutes on a UNC entry
+// (e.g. a dead \\wsl$ path), so this drives cmd.exe, starts from a minimal PATH, then
+// rebuilds the user's real PATH without UNC or missing folders. Sessions started from
+// here inherit that PATH, so they get the user's tools (git, node, claude...).
+const POWERSHELL = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
+const CLEAN_PATH = "(([Environment]::GetEnvironmentVariable('Path','Machine') + ';' + " +
+  "[Environment]::GetEnvironmentVariable('Path','User')) -split ';' | " +
+  "Where-Object { $_ -and $_ -notlike '\\\\*' -and (Test-Path -LiteralPath $_ -PathType Container) } | " +
+  'Select-Object -Unique) -join \';\'';
+
 class SshPsmuxSource extends ShellSource {
   get remoteShell() { return 'cmd /q'; }
 
   get homeCommand() { return 'echo %USERPROFILE%'; }
 
   init() { return ['prompt @OO@', 'set "PATH=C:\\Windows\\system32;C:\\Windows"', 'chcp 65001 >nul']; }
+
+  async setup() {
+    // < NUL: otherwise PowerShell reads (and swallows) the commands queued after it
+    const out = this.clean(await this.raw([`${POWERSHELL} -NoLogo -NoProfile -NonInteractive -Command "${CLEAN_PATH}" < NUL`], 30000));
+    const clean = out.split(/\r?\n/).map((s) => s.trim()).filter((s) => /system32/i.test(s)).pop();
+    if (clean && !/["%]/.test(clean)) await this.raw([`set "PATH=${clean}"`]);
+  }
 
   render(argv) {
     const bin = this.cfg.psmux || 'psmux';
