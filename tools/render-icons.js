@@ -13,6 +13,8 @@ const OUT = [
   { svg: 'spiky-cloud-black-small.svg', file: 'tray-black-32.png', size: 32 },
   { svg: 'spiky-cloud-white-small.svg', file: 'toast-white-256.png', size: 256 },
   { svg: 'spiky-cloud-black.svg', file: 'toast-black-256.png', size: 256 },
+  // app/installer icon: needs its own dark tile so it reads on light Explorer too
+  { svg: 'spiky-cloud-white-small.svg', file: 'app-256.png', size: 256, tile: '#141414' },
 ];
 
 app.whenReady().then(async () => {
@@ -28,8 +30,11 @@ app.whenReady().then(async () => {
         c.width = s; c.height = s;
         const g = c.getContext('2d');
         g.clearRect(0, 0, s, s);
-        const h = s * 260 / 416;  // art is 416x260: fit width, center vertically
-        g.drawImage(img, 0, (s - h) / 2, s, h);
+        const tile = ${JSON.stringify(o.tile || '')};
+        const pad = tile ? s * 0.14 : 0;
+        if (tile) { g.fillStyle = tile; g.beginPath(); g.roundRect(0, 0, s, s, s * 0.22); g.fill(); }
+        const w = s - pad * 2, h = w * 260 / 416;  // art is 416x260: fit width, center vertically
+        g.drawImage(img, pad, (s - h) / 2, w, h);
         resolve(c.toDataURL('image/png'));
       };
       img.src = ${JSON.stringify(url)};

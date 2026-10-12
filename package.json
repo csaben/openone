@@ -6,9 +6,43 @@
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "icons": "electron tools/render-icons.js",
+    "dist": "electron-builder --win nsis"
   },
   "devDependencies": {
-    "electron": "^38.2.0"
+    "electron": "^38.2.0",
+    "electron-builder": "^26.15.3"
+  },
+  "productName": "openone",
+  "author": "csaben",
+  "build": {
+    "appId": "com.csaben.openone",
+    "productName": "openone",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**",
+      "assets/**",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "src/wt-focus.ps1",
+      "assets/**"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "assets/app-256.png"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "runAfterFinish": true,
+      "createDesktopShortcut": false,
+      "createStartMenuShortcut": true,
+      "shortcutName": "openone",
+      "artifactName": "openone-setup-${version}.${ext}"
+    }
   }
 }

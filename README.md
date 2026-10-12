@@ -25,11 +25,12 @@ Needs Node 18+, Windows Terminal, [psmux](https://github.com/marlocarlo/psmux) (
 ```powershell
 git clone https://github.com/csaben/openone
 cd openone
-npm install
-.\start-openone.cmd
+just install        # or: npm install; npm run dist; then run dist\openone-setup-*.exe
 ```
 
-On first run it writes `config.json`. psmux is turned on if it's installed, and every host in `~/.ssh/config` is added but turned off. Set `"enabled": true` on the ones you want, make each `wtTab` regex match that host's Windows Terminal tab title, then choose **Reload config** from the tray. See `config.example.json` for the shape.
+That builds a one-click, per-user installer, installs openone, launches it and makes it start at login. Other recipes: `just dev` (run from source), `just push-config`, `just uninstall`. Plain `npm install` + `.\start-openone.cmd` also runs it straight from the checkout.
+
+On first run it writes `config.json` (to `%APPDATA%\openone` for an installed copy). psmux is turned on if it's installed, and every host in `~/.ssh/config` is added but turned off. Set `"enabled": true` on the ones you want, make each `wtTab` regex match that host's Windows Terminal tab title, then choose **Reload config** from the tray. See `config.example.json` for the shape.
 
 **Ctrl+Alt+Space** opens the panel. In the panel, **Enter** jumps to the pane, **Tab** moves to the next item and **Esc** closes it. The tray menu has mute, start at login and config.
 

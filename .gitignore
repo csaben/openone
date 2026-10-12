@@ -5,3 +5,4 @@ config.json
 # reference screenshots of getone.one, not ours to publish
 expanded-view.png
 minimized-view.png
+dist/

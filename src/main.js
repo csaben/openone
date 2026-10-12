@@ -7,8 +7,10 @@ const { createSource } = require('./sources');
 const { WindowsTerminal } = require('./wt');
 const { detect: detectConfig } = require('./setup');
 
-const CONFIG = path.join(__dirname, '..', 'config.json');
-const ASSETS = path.join(__dirname, '..', 'assets');
+// Installed builds keep config in %APPDATA%\openone; a source checkout uses ./config.json.
+const CONFIG = app.isPackaged ? path.join(app.getPath('userData'), 'config.json') : path.join(__dirname, '..', 'config.json');
+// assets are unpacked from the asar so Windows (toasts) can read them as plain files
+const ASSETS = path.join(__dirname, '..', 'assets').replace('app.asar', 'app.asar.unpacked');
 // Taskbar and toasts follow the Windows "system" theme, not the app theme:
 // white cloud on a dark shell, black cloud on a light one.
 function lightShell() {
@@ -40,6 +42,7 @@ let firstRun = false;
 
 function loadConfig() {
   if (!fs.existsSync(CONFIG)) {
+    fs.mkdirSync(path.dirname(CONFIG), { recursive: true });
     fs.writeFileSync(CONFIG, `${JSON.stringify(detectConfig(), null, 2)}\n`);
     firstRun = true;
   }
@@ -246,7 +249,7 @@ function toggle() {
 if (!app.requestSingleInstanceLock()) app.quit();
 
 app.whenReady().then(() => {
-  app.setAppUserModelId('openone');
+  app.setAppUserModelId('com.csaben.openone');
   loadConfig();
   createWindow();
   wt.start();
@@ -260,6 +263,12 @@ app.whenReady().then(() => {
   if (cfg.hotkey) globalShortcut.register(cfg.hotkey, toggle);
   if (process.env.OO_EXPAND) setTimeout(toggle, 4000);
   if (firstRun) welcome();
+  // An installed copy starts at login by default, once. Turning it off in the tray sticks.
+  const loginMarker = path.join(app.getPath('userData'), '.login-default');
+  if (app.isPackaged && !fs.existsSync(loginMarker)) {
+    app.setLoginItemSettings({ openAtLogin: true });
+    fs.writeFileSync(loginMarker, '');
+  }
 
   ipcMain.on('ui:size', (_e, s) => { if (SIZES[s] && s !== size) { size = s; place(); } });
   ipcMain.on('ui:ignore', (_e, ignore) => win.setIgnoreMouseEvents(!!ignore, { forward: true }));
