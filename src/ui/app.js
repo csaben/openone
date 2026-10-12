@@ -163,7 +163,7 @@ function render() {
   $('#hint').classList.toggle('show', !!hint);
   $('#b-inbox').classList.toggle('on', !!showInbox);
   $('#b-agents').classList.toggle('on', !showInbox);
-  requestAnimationFrame(layout);
+  layout();
 }
 
 function layout() {
@@ -182,7 +182,8 @@ function expand(v, key) {
   view = v || (inbox().length ? 'inbox' : 'agents');
   if (key) cur = key;
   kb = -1;
-  requestAnimationFrame(() => root.classList.replace('collapsed', 'expanded'));
+  void root.offsetWidth;
+  root.classList.replace('collapsed', 'expanded');
   hidePeek();
   sig = '';
   render();
@@ -258,7 +259,8 @@ function peek({ key, type }) {
     const line = type === 'input' ? (p.question || 'Waiting for your answer') : (p.summary || p.title || 'Finished');
     $('#peek').innerHTML = `${who(p, false)}<div class="line">${esc(line)}</div>`;
     window.oo.size('peek');
-    requestAnimationFrame(() => $('#peek').classList.add('show'));
+    void $('#peek').offsetWidth;
+    $('#peek').classList.add('show');
     clearTimeout(peekTimer);
     peekTimer = setTimeout(() => { if (!$('#peek').matches(':hover')) hidePeek(); else peekTimer = setTimeout(hidePeek, 3000); }, 7000);
   }, 90);

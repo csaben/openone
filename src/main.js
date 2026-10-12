@@ -77,7 +77,7 @@ function createWindow() {
   win = new BrowserWindow({
     width: SIZES.tab[0], height: SIZES.tab[1], frame: false, transparent: true, resizable: false, movable: false,
     skipTaskbar: true, alwaysOnTop: true, hasShadow: false, show: false, backgroundColor: '#00000000',
-    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false },
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, backgroundThrottling: false },
   });
   win.setAlwaysOnTop(true, 'screen-saver');
   win.setIgnoreMouseEvents(true, { forward: true });
@@ -245,6 +245,10 @@ function toggle() {
   win.webContents.focus();
   win.webContents.send('expand');
 }
+
+// Chromium treats a mostly-transparent topmost window as occluded and stops painting it,
+// freezing transitions half-way (ghost rail) and dropping frames (flicker).
+app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
 
 if (!app.requestSingleInstanceLock()) app.quit();
 

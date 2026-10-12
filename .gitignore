@@ -6,3 +6,5 @@ config.json
 expanded-view.png
 minimized-view.png
 dist/
+# stray screenshots dropped in the repo root
+/*.png
