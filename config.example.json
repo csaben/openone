@@ -1,0 +1,10 @@
+{
+  "hosts": [
+    { "name": "desktop", "type": "psmux", "pollMs": 1500, "wtTab": "PowerShell|pwsh|psmux|tmux", "wtTabIndex": 0 },
+    { "name": "gpu-box", "type": "ssh", "ssh": "me@gpu-box", "pollMs": 1500, "wtTab": "gpu-box|me@", "wtTabIndex": 1 }
+  ],
+  "hotkey": "Control+Alt+Space",
+  "notify": { "input": true, "done": true, "toast": true, "sound": true },
+  "showShells": false,
+  "display": "primary"
+}

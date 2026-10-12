@@ -1,0 +1,14 @@
+{
+  "name": "openone",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Windows edge-dock that watches your tmux/psmux agent panes and jumps to them in Windows Terminal",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/*.test.js"
+  },
+  "devDependencies": {
+    "electron": "^38.2.0"
+  }
+}

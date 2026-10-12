@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
+  <title>openone</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="root" class="collapsed">
+    <div id="tab" class="hit" title="openone (Ctrl+Alt+Space)"><svg class="logo" viewBox="0 20 416 260"><path d="M225.0 87.6 L279.3 37.6 L271.1 100.2 L330.8 79.5 L306.4 123.3 L370.9 121.0 L325.5 153.6 L407.2 170.0 L319.8 186.0 L348.0 212.4 L292.6 213.6 L298.4 238.1 L257.3 232.9 L256.4 264.2 L219.2 242.8 L200.0 253.2 L180.8 242.8 L152.1 250.0 L142.7 232.9 L85.9 249.0 L107.4 213.6 L52.0 212.4 L80.2 186.0 L15.0 170.0 L74.5 153.6 L8.6 115.1 L93.6 123.3 L69.2 79.5 L128.9 100.2 L129.2 51.7 L175.0 87.6 L200.0 42.0 L225.0 87.6 Z" style="fill:currentColor;stroke:currentColor;stroke-width:18"/><ellipse cx="172" cy="160" rx="18" ry="27" style="fill:#0d0e10;stroke:none"/><ellipse cx="228" cy="160" rx="18" ry="27" style="fill:#0d0e10;stroke:none"/></svg><div id="tab-marks"></div></div>
+
+    <div id="peek" class="hit"></div>
+
+    <div id="rail">
+      <button id="b-inbox" class="rb hit" title="Inbox">
+        <svg viewBox="0 0 16 16"><path d="M2.5 9.5h3l1 1.5h3l1-1.5h3"/><path d="M4 3h8l1.5 6.5V12a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1V9.5Z"/></svg>
+        <span class="badge"></span>
+      </button>
+      <div id="b-agents" class="rpill hit" title="All agents"></div>
+      <div class="rpill tools hit">
+        <button id="b-term" title="Open Windows Terminal"><svg viewBox="0 0 16 16"><rect x="2" y="3" width="12" height="10" rx="2"/><path d="m5 7 2 1.5L5 10M8.5 10.5H11"/></svg></button>
+        <button id="b-mute" title="Mute notifications"><svg viewBox="0 0 16 16"><path d="M4.5 11V7.5a3.5 3.5 0 0 1 7 0V11l1 1.5h-9Z"/><path d="M6.8 14h2.4"/></svg></button>
+      </div>
+      <button id="b-more" class="rb hit" title="More"><svg viewBox="0 0 16 16"><circle cx="4" cy="8" r=".9"/><circle cx="8" cy="8" r=".9"/><circle cx="12" cy="8" r=".9"/></svg></button>
+    </div>
+
+    <div id="card" class="hit">
+      <div class="caret"></div>
+      <div id="card-body"></div>
+    </div>
+    <div id="hint" class="hit"></div>
+    <div id="toast"></div>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>

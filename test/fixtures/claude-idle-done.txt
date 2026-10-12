@@ -1,0 +1,11 @@
+  For the pricing page:
+  - Three tiers render side by side on desktop and stack on mobile. The yearly toggle swaps prices without a reload.
+  - Checkout buttons still point at the placeholder route. Wiring them to the payment provider is the next step.
+  - I did not touch the landing page styles.
+
+✻ Crunched for 18s · done 10:39 AM
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ jk
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle)

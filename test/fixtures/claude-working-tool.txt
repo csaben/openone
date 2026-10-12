@@ -1,0 +1,12 @@
+● Reading the checkout route before adding the payment button.
+
+● Bash(npm run test -- checkout)
+  ⎿  Running… (15s)
+     (ctrl+b ctrl+b (twice) to run in background)
+
+✢ Crafting… (1m 35s · ↓ 4.2k tokens)
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle) · esc to interrupt · ← 1 agent

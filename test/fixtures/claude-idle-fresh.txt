@@ -1,0 +1,22 @@
+PS C:\Users\dev\shop> claude --permission-mode
+default
+ ▐▛███▛█   Claude Code v2.1.296
+▝▜██████▀  Opus 5.5 (1M context) · Claude Max
+ ▝▝   ▝▝   ~\shop
+
+
+❯ some draft text hereRun this exact bash command with the Bash tool: echo openone-fixture > out.txt
+
+● Bash(echo openone-fixture > out.txt)
+  ⎿  (No output)
+
+● I ran echo openone-fixture > out.txt with the Bash tool. It finished with no errors and wrote openone-fixture to out.txt in the working
+  directory.
+
+✻ Baked for 7s · done 12:45 AM
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ cat out.txt
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⚠ Transcript saving is off — inherited CLAUDE_CODE_CHILD_SESSION marker · restart with CLAUDE_CODE_FORCE_SESSION_PERSISTENCE=1 to keep …
+  ⏸ manual mode on · ? for shortcuts                                                                                                   /rc

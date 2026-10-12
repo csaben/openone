@@ -1,0 +1,7 @@
+node_modules/
+*.log
+# per-machine: hosts, IPs, users. config.example.json is the template.
+config.json
+# reference screenshots of getone.one, not ours to publish
+expanded-view.png
+minimized-view.png
