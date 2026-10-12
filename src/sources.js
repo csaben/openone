@@ -93,6 +93,8 @@ class TmuxSource {
   async newSession({ name, cwd, cmd }) {
     if (!SESSION_NAME.test(name || '')) throw new Error('session name: letters, digits, _ . - only');
     if (cwd && /["\r\n]/.test(cwd)) throw new Error('bad cwd');
+    // tmux doesn't expand ~ in -c (it silently falls back to $HOME)
+    if (cwd && /^~(?=$|[\\/])/.test(cwd)) cwd = (await this.home()) + cwd.slice(1);
     const [out] = await this.batch([['new-session', '-d', '-s', name, ...(cwd ? ['-c', cwd] : [])]]);
     if (/duplicate session|already exists/i.test(out)) throw new Error(`session ${name} already exists`);
     const [list] = await this.batch([['list-panes', '-t', name, '-F', FMT]]);
@@ -119,6 +121,8 @@ class LocalSource extends TmuxSource {
     super(cfg);
     this.bin = cfg.bin || (cfg.type === 'tmux' ? 'tmux' : 'psmux');
   }
+
+  async home() { return require('os').homedir(); }
 
   run(args) {
     return new Promise((resolve) => {
@@ -224,6 +228,11 @@ class ShellSource extends TmuxSource {
 
   clean(s) { return s; }
 
+  async home() {
+    if (!this.homeDir) this.homeDir = this.clean(await this.exec([this.homeCommand])).trim().split(/\r?\n/).pop().trim();
+    return this.homeDir;
+  }
+
   close() { if (this.proc) this.proc.kill(); }
 }
 
@@ -231,6 +240,8 @@ const sq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 
 class SshTmuxSource extends ShellSource {
   get remoteShell() { return 'exec bash --norc --noprofile'; }
+
+  get homeCommand() { return 'echo "$HOME"'; }
 
   init() { return []; }
 
@@ -242,6 +253,8 @@ class SshTmuxSource extends ShellSource {
 // minimal PATH and calls psmux by full path.
 class SshPsmuxSource extends ShellSource {
   get remoteShell() { return 'cmd /q'; }
+
+  get homeCommand() { return 'echo %USERPROFILE%'; }
 
   init() { return ['prompt @OO@', 'set "PATH=C:\\Windows\\system32;C:\\Windows"', 'chcp 65001 >nul']; }
 
