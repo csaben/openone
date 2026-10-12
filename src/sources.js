@@ -95,14 +95,16 @@ class TmuxSource {
     if (cwd && /["\r\n]/.test(cwd)) throw new Error('bad cwd');
     // tmux doesn't expand ~ in -c (it silently falls back to $HOME)
     if (cwd && /^~(?=$|[\\/])/.test(cwd)) cwd = (await this.home()) + cwd.slice(1);
-    const [out] = await this.batch([['new-session', '-d', '-s', name, ...(cwd ? ['-c', cwd] : [])]]);
+    const typedCd = cwd && this.cdCommand ? this.cdCommand(cwd) : '';
+    const [out] = await this.batch([['new-session', '-d', '-s', name, ...(cwd && !typedCd ? ['-c', cwd] : [])]]);
     if (/duplicate session|already exists/i.test(out)) throw new Error(`session ${name} already exists`);
     const [list] = await this.batch([['list-panes', '-t', name, '-F', FMT]]);
     const pane = list.split('\n').map(parseRow).filter(Boolean)[0];
     if (!pane) throw new Error(`could not start session: ${out.trim() || 'no pane'}`);
-    if (cmd) {
-      await new Promise((r) => setTimeout(r, this.cfg.shellWarmMs || 800));
-      await this.text(pane, cmd);
+    const line = [typedCd, cmd].filter(Boolean).join('; ');
+    if (line) {
+      await new Promise((r) => setTimeout(r, this.cfg.shellWarmMs || 1200));
+      await this.text(pane, line);
       await this.keys(pane, ['Enter']);
     }
     return pane;
@@ -270,6 +272,10 @@ class SshPsmuxSource extends ShellSource {
   get homeCommand() { return 'echo %USERPROFILE%'; }
 
   init() { return ['prompt @OO@', 'set "PATH=C:\\Windows\\system32;C:\\Windows"', 'chcp 65001 >nul']; }
+
+  // psmux drops a session created over ssh with `-c dir` within a second, so start in
+  // the default folder and change directory inside its PowerShell instead.
+  cdCommand(dir) { return `Set-Location -LiteralPath '${dir.replace(/'/g, "''")}'`; }
 
   async setup() {
     // < NUL: otherwise PowerShell reads (and swallows) the commands queued after it
