@@ -20,7 +20,7 @@ Nothing is installed on the remote machine. openone reads panes with `tmux captu
 
 ## Setup
 
-Needs Node 18+, Windows Terminal, [psmux](https://github.com/marlocarlo/psmux) (`winget install marlocarlo.psmux`) for local panes, and ssh key auth to any remote hosts.
+Needs Node 18+, [just](https://github.com/casey/just), Windows Terminal, [psmux](https://github.com/marlocarlo/psmux) (`winget install marlocarlo.psmux`) for local panes, and ssh key auth to any remote hosts.
 
 ```powershell
 git clone https://github.com/csaben/openone
