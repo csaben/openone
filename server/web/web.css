@@ -15,7 +15,7 @@ body.web #toast { position: fixed; bottom: 20px; right: 50%; transform: translat
 /* pane viewer and forms: a sheet over everything */
 #sheet {
   position: fixed; inset: 0; z-index: 10; display: none; flex-direction: column;
-  background: rgba(8, 9, 11, .97); padding: max(12px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom));
+  background: #08090b; padding: max(12px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom));
 }
 #sheet.show { display: flex; }
 #sheet .bar { display: flex; align-items: center; gap: 6px; padding: 4px 4px 10px; }
