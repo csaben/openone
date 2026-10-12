@@ -34,7 +34,11 @@
 
   function connect() {
     const es = new EventSource('api/events');
-    es.addEventListener('state', (e) => { last = JSON.parse(e.data); emitState(); });
+    es.addEventListener('state', (e) => {
+      last = JSON.parse(e.data);
+      emitState();
+      if (viewing) { applyView(); render(); } // the question/options bar follows the pane's state
+    });
     es.addEventListener('peek', (e) => {
       const ev = JSON.parse(e.data);
       const p = last.panes.find((x) => x.key === ev.key);
@@ -70,36 +74,63 @@
     clearInterval(timer);
   }
 
-  // Terminal padding is noise when wrapped: trailing spaces, huge gaps, full-width rules.
-  function tidy(text) {
-    let lines = text.replace(/\s+$/, '').split('\n').map((l) => l.replace(/\s+$/, ''));
-    if (wrap) lines = lines.map((l) => l.replace(/([─━═╌]{24})[─━═╌]+/g, '$1').replace(/(\S) {6,}(?=\S)/g, '$1   '));
-    return lines.join('\n');
+  // Agent panes default to the chat view (prompts as bubbles, reflowed replies, folded
+  // tool calls); "term" shows the terminal itself, in color. Shells are always term.
+  let chatView = store.get('chat', true);
+  let shown = '';
+  const isAgent = () => { const p = last.panes.find((x) => x.key === viewing); return !!(p && p.kind); };
+  const useChat = () => chatView && isAgent();
+
+  // Terminal padding is noise when wrapped: huge gaps, full-width rules.
+  function tidy(html) {
+    return wrap ? html.replace(/([─━═╌]{24})[─━═╌]+/g, '$1').replace(/([^\s>]) {6,}(?=[^\s<])/g, '$1   ') : html;
   }
 
   function applyView() {
-    const pre = sheet.querySelector('pre');
-    if (!pre) return;
-    pre.classList.toggle('wrap', wrap);
-    pre.style.fontSize = `${fontPx}px`;
+    const pre = sheet.querySelector('pre.raw');
+    const box = sheet.querySelector('.chat');
+    if (pre) pre.hidden = useChat();
+    if (box) box.hidden = !useChat();
+    if (pre) { pre.classList.toggle('wrap', wrap); pre.style.fontSize = `${fontPx}px`; }
+    if (box) box.style.fontSize = `${Math.round(fontPx * 1.4 * 2) / 2}px`;
     const w = sheet.querySelector('[data-wrap]');
-    if (w) w.classList.toggle('on', wrap);
+    if (w) { w.classList.toggle('on', wrap); w.hidden = useChat(); }
+    const v = sheet.querySelector('[data-view]');
+    if (v) { v.hidden = !isAgent(); v.textContent = useChat() ? 'term' : 'chat'; }
+  }
+
+  function askHtml(p) {
+    if (!p || p.state !== 'input' || !(p.options || []).length) return '';
+    const e = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    return `<div class="ask">${p.question ? `<div class="q">${e(p.question)}</div>` : ''}${
+      p.options.map((o) => `<button data-n="${o.n}">${o.n}. ${e(o.label)}</button>`).join('')}</div>`;
   }
 
   function render(stick) {
-    const pre = sheet.querySelector('pre');
-    if (!pre) return;
-    const atBottom = stick || pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 30;
-    pre.textContent = tidy(raw);
-    if (atBottom) pre.scrollTop = pre.scrollHeight;
+    const p = last.panes.find((x) => x.key === viewing);
+    const chat = useChat();
+    const el = sheet.querySelector(chat ? '.chat' : 'pre.raw');
+    if (!el) return;
+    const key = `${chat}|${wrap}|${p && p.state}|${p && p.question}|${raw}`;
+    if (key === shown && !stick) return;
+    shown = key;
+    const atBottom = stick || el.scrollTop + el.clientHeight >= el.scrollHeight - 30;
+    if (chat) {
+      const open = new Set([...el.querySelectorAll('details[open]')].map((d) => d.dataset.k));
+      el.innerHTML = window.OOChat.chat(raw, p || {}) + askHtml(p);
+      el.querySelectorAll('details').forEach((d) => { if (open.has(d.dataset.k)) d.open = true; });
+    } else {
+      el.innerHTML = tidy(window.OOChat.raw(raw));
+    }
+    if (atBottom) el.scrollTop = el.scrollHeight;
   }
 
   async function refresh() {
     if (!viewing) return;
     try {
-      raw = (await call('GET', `api/panes/${enc(viewing)}/screen?lines=300`)).text;
+      raw = (await call('GET', `api/panes/${enc(viewing)}/screen?lines=300&ansi=1`)).text;
       render();
-    } catch (e) { sheet.querySelector('pre').textContent = `(${e.message})`; }
+    } catch (e) { const el = sheet.querySelector('pre.raw'); if (el) el.textContent = `(${e.message})`; }
   }
 
   function setFont(px) {
@@ -113,19 +144,22 @@
     const name = p ? `${p.kind || 'shell'} · ${p.label}` : key.split('|').slice(1).join(' ');
     viewing = key;
     raw = '';
+    shown = '';
     sheet.innerHTML = `
       <div class="bar"><b></b><span class="sp"></span>
         <button data-zoom="-1" title="Smaller text">A−</button><button data-zoom="1" title="Larger text">A+</button>
+        <button data-view title="Switch between chat and terminal view">term</button>
         <button data-wrap title="Wrap long lines">wrap</button>
         <button data-k="Escape" title="Esc">esc</button><button data-k="C-c" title="Ctrl+C">^C</button>
         <button data-focus title="Select this pane in its tmux session">focus</button>
         <button data-close title="Close">✕</button></div>
-      <pre></pre>
+      <div class="chat"></div><pre class="raw"></pre>
       <form class="send"><input placeholder="Type into this pane…  (Enter sends)" spellcheck="false" autocomplete="off"><button>↵</button></form>`;
     sheet.querySelector('b').textContent = name;
     sheet.classList.add('show');
     applyView();
-    pinch(sheet.querySelector('pre'));
+    pinch(sheet.querySelector('pre.raw'));
+    pinch(sheet.querySelector('.chat'));
     call('POST', `api/panes/${enc(key)}/seen`).catch(() => {});
     refresh();
     clearInterval(timer);
@@ -152,7 +186,9 @@
     if (t.dataset.close !== undefined) return closeSheet();
     if (t.dataset.zoom) return setFont(fontPx + Number(t.dataset.zoom));
     if (t.dataset.wrap !== undefined) { wrap = !wrap; store.set('wrap', wrap); applyView(); return render(true); }
+    if (t.dataset.view !== undefined) { chatView = !chatView; store.set('chat', chatView); applyView(); return render(true); }
     try {
+      if (t.dataset.n) { await call('POST', `api/panes/${enc(viewing)}/answer`, { n: Number(t.dataset.n) }); setTimeout(refresh, 400); return; }
       if (t.dataset.k) await call('POST', `api/panes/${enc(viewing)}/keys`, { keys: [t.dataset.k] });
       else if (t.dataset.focus !== undefined) { await call('POST', `api/panes/${enc(viewing)}/focus`); toast('Selected in tmux'); }
       setTimeout(refresh, 300);

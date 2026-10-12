@@ -105,6 +105,7 @@ const STATIC = {
   '/style.css': path.join(ROOT, 'src', 'ui', 'style.css'),
   '/app.js': path.join(ROOT, 'src', 'ui', 'app.js'),
   '/web.js': path.join(__dirname, 'web', 'web.js'),
+  '/chat.js': path.join(__dirname, 'web', 'chat.js'),
   '/web.css': path.join(__dirname, 'web', 'web.css'),
   '/manifest.webmanifest': path.join(__dirname, 'web', 'manifest.webmanifest'),
 };
@@ -121,7 +122,7 @@ function indexHtml() {
       '<link rel="apple-touch-icon" href="assets/app-256.png">',
     ].join('\n  '))
     .replace('<link rel="stylesheet" href="style.css">', '<link rel="stylesheet" href="style.css">\n  <link rel="stylesheet" href="web.css">')
-    .replace('<script src="app.js"></script>', '<script src="web.js"></script>\n  <script src="app.js"></script>');
+    .replace('<script src="app.js"></script>', '<script src="chat.js"></script>\n  <script src="web.js"></script>\n  <script src="app.js"></script>');
 }
 
 function pane(key) {
@@ -151,8 +152,10 @@ async function api(req, res, parts) {
   if (a === 'panes' && b) {
     const { p, h } = pane(decodeURIComponent(b));
     if (m === 'GET' && c === 'screen') {
-      const lines = Math.min(Number(new URL(req.url, 'http://x').searchParams.get('lines')) || 200, 2000);
-      const [text] = await h.src.batch([['capture-pane', '-p', '-J', '-S', `-${lines}`, '-t', h.src.target(p)]]);
+      const q = new URL(req.url, 'http://x').searchParams;
+      const lines = Math.min(Number(q.get('lines')) || 200, 2000);
+      const color = q.get('ansi') === '1' ? ['-e'] : []; // keep colors for the web viewer
+      const [text] = await h.src.batch([['capture-pane', '-p', ...color, '-J', '-S', `-${lines}`, '-t', h.src.target(p)]]);
       return send(res, 200, { key: p.key, text: text.replace(/\r/g, '') });
     }
     if (m === 'POST') {

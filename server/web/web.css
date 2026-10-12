@@ -61,3 +61,56 @@ body.web #toast { position: fixed; bottom: 20px; right: 50%; transform: translat
 #webmenu.show { display: flex; }
 #webmenu button { text-align: left; padding: 9px 12px; border-radius: 8px; font-size: 13px; }
 #webmenu button:hover { background: rgba(255, 255, 255, .06); }
+
+/* chat view: the pane as a conversation */
+#sheet .chat {
+  flex: 1; overflow: auto; padding: 4px 2px 12px; user-select: text; -webkit-user-select: text;
+  font: 15px/1.5 var(--sans); color: #e4e6ea; overflow-wrap: anywhere;
+}
+#sheet .chat p { margin: 0; }
+#sheet .chat a { color: #7cb3ff; }
+#sheet .chat .gap { display: block; height: .7em; }
+#sheet .chat .msg { margin: 10px 0; }
+#sheet .chat .you {
+  margin-left: 14%; padding: 9px 13px; border-radius: 16px 16px 4px 16px;
+  background: #24476f; color: #f2f6fb;
+}
+#sheet .chat .bot { padding: 0 4px; }
+#sheet .chat .bot.cont { margin-top: -2px; }
+#sheet .chat .li { display: flex; gap: .45em; margin-top: .25em; }
+#sheet .chat .li .mk { flex: none; min-width: .8em; color: #8d919a; }
+#sheet .chat .li > span:last-child { min-width: 0; }
+#sheet .chat pre {
+  margin: 6px 0; padding: 8px 10px; border-radius: 10px; background: #111216; overflow-x: auto;
+  font: 11.5px/1.4 var(--mono); white-space: pre;
+}
+#sheet .chat .tool, #sheet .chat .meta, #sheet .chat .status {
+  margin: 6px 4px; font-size: 13px; color: #9a9ea7;
+}
+#sheet .chat .tool {
+  border-radius: 10px; background: #17181c; border: 1px solid rgba(255, 255, 255, .05);
+}
+#sheet .chat .tool > summary, #sheet .chat div.tool > span {
+  display: block; padding: 7px 10px; font: 12.5px/1.4 var(--mono); color: #b9bdc5;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; list-style: none; cursor: pointer;
+}
+#sheet .chat .tool > summary::-webkit-details-marker { display: none; }
+#sheet .chat .tool > summary::before { content: '▸ '; color: #5f636b; }
+#sheet .chat .tool[open] > summary::before { content: '▾ '; }
+#sheet .chat .tool[open] > summary { white-space: normal; }
+#sheet .chat .tool > pre { margin: 0 6px 6px; max-height: 50vh; overflow: auto; }
+#sheet .chat .tool.err { border-color: rgba(224, 108, 117, .35); }
+#sheet .chat .meta { padding-left: 10px; border-left: 2px solid #2a2c31; font-size: 12.5px; }
+#sheet .chat .status { text-align: center; font-size: 12px; color: #7d818a; margin: 12px 0; }
+#sheet .chat .status.live { color: #e5c07b; animation: oo-pulse 1.6s ease-in-out infinite; }
+@keyframes oo-pulse { 50% { opacity: .5; } }
+#sheet .chat .warn { margin: 8px 4px; padding: 8px 10px; border-radius: 10px; background: #2b2410; color: #f0d08a; font-size: 13px; }
+#sheet .chat pre.term { color: #c9ccd2; }
+#sheet .ask { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+#sheet .ask .q { font-size: 14px; color: #e4e6ea; padding: 0 2px; }
+#sheet .ask button {
+  text-align: left; padding: 10px 12px; border-radius: 11px; background: #1d1e22; border: 1px solid rgba(255, 255, 255, .07);
+  color: #e4e6ea; font-size: 14px;
+}
+#sheet .ask button:active { background: #2f7cf6; }
+#sheet pre.raw { font-family: ui-monospace, var(--mono); }
