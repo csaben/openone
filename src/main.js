@@ -1,4 +1,5 @@
-const { app, BrowserWindow, ipcMain, screen, globalShortcut, Notification, Tray, Menu, nativeImage, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, screen, globalShortcut, Notification, Tray, Menu, nativeImage, nativeTheme, shell } = require('electron');
+const { execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const { Monitor } = require('./monitor');
@@ -8,7 +9,17 @@ const { detect: detectConfig } = require('./setup');
 
 const CONFIG = path.join(__dirname, '..', 'config.json');
 const ASSETS = path.join(__dirname, '..', 'assets');
-const ICON_TOAST = path.join(ASSETS, 'icon-256.png');
+// Taskbar and toasts follow the Windows "system" theme, not the app theme:
+// white cloud on a dark shell, black cloud on a light one.
+function lightShell() {
+  try {
+    const out = execFileSync('reg', ['query', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize', '/v', 'SystemUsesLightTheme'],
+      { encoding: 'utf8', windowsHide: true });
+    return /0x1\s*$/m.test(out);
+  } catch { return false; }
+}
+const shade = () => (lightShell() ? 'black' : 'white');
+const toastIcon = () => path.join(ASSETS, `toast-${shade()}-256.png`);
 // Only as big as what's showing: a full-size transparent topmost window makes the
 // terminal underneath repaint, so collapsed it shrinks to the edge tab.
 const SIZES = { tab: [34, 240], peek: [360, 240], full: [560, 660] };
@@ -42,7 +53,7 @@ function welcome() {
   const n = new Notification({
     title: 'openone is running',
     body: `Wrote config.json${ssh ? ` with ${ssh} ssh host${ssh > 1 ? 's' : ''} from ~/.ssh/config, turned off` : ''}. Edit it, then Reload config from the tray.`,
-    icon: ICON_TOAST,
+    icon: toastIcon(),
   });
   n.on('click', () => shell.openPath(CONFIG));
   n.show();
@@ -115,8 +126,8 @@ async function notify(ev) {
   if (!cfg.notify.toast || !Notification.isSupported()) return;
   const who = `${p.kind || 'agent'} · ${p.label}`;
   const n = new Notification(ev.type === 'input'
-    ? { title: `${who} needs you`, body: p.question || 'Waiting for your answer', silent: !cfg.notify.sound, icon: ICON_TOAST }
-    : { title: `${who} finished`, body: (p.summary || p.title || 'Idle').slice(0, 180), silent: !cfg.notify.sound, icon: ICON_TOAST });
+    ? { title: `${who} needs you`, body: p.question || 'Waiting for your answer', silent: !cfg.notify.sound, icon: toastIcon() }
+    : { title: `${who} finished`, body: (p.summary || p.title || 'Idle').slice(0, 180), silent: !cfg.notify.sound, icon: toastIcon() });
   n.on('click', () => jump(ev.key));
   n.show();
 }
@@ -197,8 +208,8 @@ async function reply(key, text) {
 }
 
 function trayIcon() {
-  const img = nativeImage.createFromPath(path.join(ASSETS, 'tray-16.png'));
-  const hi = nativeImage.createFromPath(path.join(ASSETS, 'tray-32.png'));
+  const img = nativeImage.createFromPath(path.join(ASSETS, `tray-${shade()}-16.png`));
+  const hi = nativeImage.createFromPath(path.join(ASSETS, `tray-${shade()}-32.png`));
   img.addRepresentation({ scaleFactor: 2, width: 32, height: 32, buffer: hi.toPNG() });
   return img;
 }
@@ -243,6 +254,7 @@ app.whenReady().then(() => {
   tray = new Tray(trayIcon());
   tray.setToolTip('openone');
   tray.on('click', toggle);
+  nativeTheme.on('updated', () => tray.setImage(trayIcon()));
   tray.setContextMenu(Menu.buildFromTemplate(menuTemplate()));
   tray.on('right-click', () => tray.setContextMenu(Menu.buildFromTemplate(menuTemplate())));
   if (cfg.hotkey) globalShortcut.register(cfg.hotkey, toggle);

@@ -1,4 +1,9 @@
-<p align="center"><img src="assets/spiky-cloud.svg" width="160" alt="openone"></p>
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/spiky-cloud-white-small.svg">
+    <img src="assets/spiky-cloud-black.svg" width="160" alt="openone">
+  </picture>
+</p>
 
 # openone
 

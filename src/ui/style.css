@@ -42,7 +42,7 @@ svg circle[r=".9"] { fill: currentColor; stroke: none; }
   transition: transform .18s ease, opacity .18s ease, width .12s ease;
 }
 #tab:hover { width: 28px; }
-#tab .logo { width: 17px; height: 11px; color: #e9eaee; opacity: .9; }
+#tab .logo { width: 20px; height: 13px; color: #e9eaee; opacity: .9; }
 #tab-marks { display: flex; flex-direction: column; align-items: center; gap: 11px; }
 #tab .more { font-size: 9px; color: var(--muted); line-height: 1; }
 #root.expanded #tab { transform: translate(30px, -50%); opacity: 0; pointer-events: none; }
