@@ -206,6 +206,18 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
+// Live reload: when the UI files change (an agent editing them, a git pull), tell open
+// pages to reload. Stands in for a dev server's hot reload in the circleback loop.
+let reloadTimer = null;
+for (const dir of [path.join(ROOT, 'src', 'ui'), path.join(__dirname, 'web')]) {
+  try {
+    fs.watch(dir, () => {
+      clearTimeout(reloadTimer);
+      reloadTimer = setTimeout(() => broadcast('reload', {}), 300);
+    });
+  } catch {}
+}
+
 server.listen(PORT, cfg.bind || '127.0.0.1', () => {
   console.log(`openone server on http://${cfg.bind || '127.0.0.1'}:${PORT} watching ${Object.keys(hosts).join(', ')}`);
 });

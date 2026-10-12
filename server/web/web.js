@@ -45,6 +45,7 @@
       });
       n.onclick = () => { window.focus(); viewer(p.key); };
     });
+    es.addEventListener('reload', () => location.reload());
     es.onerror = () => {}; // EventSource reconnects by itself
   }
 
