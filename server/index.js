@@ -30,7 +30,7 @@ let lastState = '';
 function state() {
   return {
     panes: monitor.view(),
-    hosts: Object.values(hosts).map((h) => ({ name: h.cfg.name, type: h.cfg.type, ok: h.ok, error: h.error })),
+    hosts: Object.values(hosts).map((h) => ({ name: h.cfg.name, type: h.cfg.type, ok: h.ok, error: h.error, fed: !!fedRecently(h) })),
   };
 }
 
