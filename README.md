@@ -34,6 +34,12 @@ On first run it writes `config.json` (to `%APPDATA%\openone` for an installed co
 
 **Ctrl+Alt+Space** opens the panel on the agent list, with the most urgent agent selected. **j**/**k** (or the arrow keys) move, **Enter** jumps to the pane, **Tab** switches to the inbox of waiting and finished agents, **r** replies, **1**–**9** answer a question and **Esc** closes. **/** searches agents by name, host or words from their conversation; arrows or Ctrl+j/k pick a match and **Enter** jumps to it. Set `hotkey` in the config to change the shortcut. The tray menu has mute, start at login and config.
 
+### Projects
+
+**n** in the panel starts or continues work in a project folder. Type what you're working on: it matches the folders in each host's `workspace`, or offers a new folder named after what you typed. Add a host name ("drive backup cradle") to pick where it goes. Then choose claude or codex and whether to continue the last chat, and **Enter** opens a new window in the tmux session that host's terminal tab shows, `cd`s into the folder (creating it if new) and starts the agent. **o** opens the folder in VS Code, over Remote-SSH for ssh hosts; **o** on a row of the agent list opens that pane's folder.
+
+Per host, `workspace` is the folder that holds your projects (default `~/Code`), and `vscode` the Remote-SSH host name if it differs from `ssh`. The agent commands can be changed with a top-level `agents`, e.g. `{ "claude": { "start": "claude", "resume": "claude --continue" }, "codex": { "start": "codex", "resume": "codex resume --last" } }`.
+
 ## Server (web and phone, experimental)
 
 `server/` runs the same watcher on an always-on Linux box. It reaches every machine over ssh, serves the same panel as a web page, and exposes an HTTP API to answer agents and start new sessions. It keeps no state of its own; tmux on each machine is the source of truth.

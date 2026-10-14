@@ -2,7 +2,7 @@
   "port": 8950,
   "allow": [],
   "hosts": [
-    { "name": "linux-box", "type": "tmux", "pollMs": 1500 },
+    { "name": "linux-box", "type": "tmux", "pollMs": 1500, "workspace": "~/Code" },
     { "name": "windows-pc", "type": "ssh-psmux", "ssh": "me@windows-pc", "psmux": "C:\\Users\\me\\AppData\\Local\\Microsoft\\WinGet\\Links\\psmux.exe", "pollMs": 2000 },
     { "name": "other-linux", "type": "ssh", "ssh": "me@other-linux", "pollMs": 1500 }
   ]
