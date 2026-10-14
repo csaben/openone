@@ -14,6 +14,7 @@ let sig = '';
 let peekKey = null;
 let peekTimer = null;
 let hintTimer = null;
+let query = null; // the agent list's "/" search: null when closed
 const drafts = {};
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -133,21 +134,33 @@ function agentsCard() {
   if (counts.working) parts.push(`${counts.working} working`);
   if (counts.done) parts.push(`${counts.done} done`);
   let i = 0;
-  const groups = S.hosts.map((h) => {
-    const rows = panes.filter((p) => p.host === h.name).map((p) => {
-      const line = status(p) === 'input' ? (p.question || 'Waiting for your answer') : (p.title || p.summary || subline(p));
-      return `<div class="row ${p.kind ? '' : 'shell'} ${i++ === kb ? 'kb' : ''}" data-jump="${esc(p.key)}">
-        <span class="st ${status(p)}"></span>
-        <div class="mid"><div class="t1"><span class="nm">${esc(p.label)}</span><span class="kind">${esc(p.kind || 'shell')}</span></div>
-        <div class="t2">${esc(line)}</div></div>
-        <span class="age">${esc(when(p))}</span></div>`;
+  const row = (p, showHost) => {
+    const line = status(p) === 'input' ? (p.question || 'Waiting for your answer') : (p.title || p.summary || subline(p));
+    return `<div class="row ${p.kind ? '' : 'shell'} ${i++ === kb ? 'kb' : ''}" data-jump="${esc(p.key)}">
+      <span class="st ${status(p)}"></span>
+      <div class="mid"><div class="t1"><span class="nm">${esc(p.label)}</span><span class="kind">${esc(p.kind || 'shell')}${showHost ? ` · ${esc(p.host)}` : ''}</span></div>
+      <div class="t2">${esc(line)}</div></div>
+      <span class="age">${esc(when(p))}</span></div>`;
+  };
+  let list;
+  if (query !== null) {
+    // searching: one list, best match first, host on each row
+    const found = window.OOSearch.filter(query, panes);
+    list = `<div class="search"><input id="q" placeholder="Search agents: name, host, or words from the chat" spellcheck="false" autocomplete="off" value="${esc(query)}"></div>
+      ${found.map((p) => row(p, true)).join('') || '<div class="empty">No matches</div>'}`;
+  } else {
+    list = S.hosts.map((h) => {
+      const rows = panes.filter((p) => p.host === h.name).map((p) => row(p, false)).join('');
+      const head = `<div class="host"><span class="dot ${h.ok ? '' : 'down'}"></span>${esc(h.name)}${h.ok ? '' : `<span class="err">${esc(h.error)}</span>`}</div>`;
+      return head + (rows || (h.ok ? '<div class="empty">No panes</div>' : ''));
     }).join('');
-    const head = `<div class="host"><span class="dot ${h.ok ? '' : 'down'}"></span>${esc(h.name)}${h.ok ? '' : `<span class="err">${esc(h.error)}</span>`}</div>`;
-    return head + (rows || (h.ok ? '<div class="empty">No panes</div>' : ''));
-  }).join('');
-  const html = `<div class="head"><h1>Agents${parts.length ? ` <span style="color:var(--muted);font-weight:500;font-size:12.5px">· ${parts.join(' · ')}</span>` : ''}</h1><button class="x" data-close>${X}</button></div>${groups}`;
+  }
+  const html = `<div class="head"><h1>Agents${parts.length ? ` <span style="color:var(--muted);font-weight:500;font-size:12.5px">· ${parts.join(' · ')}</span>` : ''}</h1><button class="x" data-close>${X}</button></div>${list}`;
   const n = inbox().length;
-  return { html, hint: `<kbd>j</kbd><kbd>k</kbd> pick · <kbd>Enter</kbd> ${OPEN_HINT}${n ? ` · <kbd>Tab</kbd> inbox (${n})` : ''}` };
+  const hint = query !== null
+    ? `<kbd>↑</kbd><kbd>↓</kbd> pick · <kbd>Enter</kbd> ${OPEN_HINT} · <kbd>Esc</kbd> clear`
+    : `<kbd>j</kbd><kbd>k</kbd> pick · <kbd>/</kbd> search · <kbd>Enter</kbd> ${OPEN_HINT}${n ? ` · <kbd>Tab</kbd> inbox (${n})` : ''}`;
+  return { html, hint };
 }
 
 function render() {
@@ -158,12 +171,17 @@ function render() {
   const { html, hint } = showInbox ? inboxCard(items) : agentsCard();
   const next = `${showInbox ? 'i' : 'a'}|${html}|${hint}`;
   if (next !== sig) {
-    const focused = document.activeElement && document.activeElement.id === 'reply';
-    const caret = focused ? document.activeElement.selectionStart : 0;
+    // keep the reply or search box focused, caret and all, across the rebuild
+    const a = document.activeElement;
+    const focused = a && (a.id === 'reply' || a.id === 'q') ? a.id : null;
+    const caret = focused ? a.selectionStart : 0;
+    const top = body.scrollTop;
     body.innerHTML = html;
+    body.scrollTop = top;
     if ($('#hint').dataset.text !== hint) { $('#hint').innerHTML = `<span>${hint}</span>`; $('#hint').dataset.text = hint; showHint(!!hint); }
     sig = next;
-    if (focused && $('#reply')) { $('#reply').focus(); $('#reply').setSelectionRange(caret, caret); }
+    const el = focused && document.getElementById(focused);
+    if (el) { el.focus(); el.setSelectionRange(caret, caret); }
   }
   $('#b-inbox').classList.toggle('on', !!showInbox);
   $('#b-agents').classList.toggle('on', !showInbox);
@@ -207,6 +225,7 @@ function expand(v, key) {
 function collapse() {
   if (!expanded || WEB) return;
   expanded = false;
+  query = null;
   root.classList.replace('expanded', 'collapsed');
   showHint(false);
   fit();
@@ -266,7 +285,7 @@ function step(d) {
     const i = items.findIndex((p) => p.key === cur);
     cur = items[(i + d + items.length) % items.length].key;
   } else {
-    const n = S.panes.length;
+    const n = body.querySelectorAll('.row').length;
     if (!n) return;
     kb = kb < 0 ? (d > 0 ? 0 : n - 1) : (kb + d + n) % n;
   }
@@ -327,7 +346,38 @@ body.addEventListener('click', (e) => {
   else if (t.dataset.send !== undefined) sendReply();
   else if (t.dataset.cur) { cur = t.dataset.cur; render(); }
 });
-body.addEventListener('input', (e) => { if (e.target.id === 'reply' && cur) drafts[cur] = e.target.value; });
+body.addEventListener('input', (e) => {
+  if (e.target.id === 'reply' && cur) drafts[cur] = e.target.value;
+  if (e.target.id === 'q') { query = e.target.value; kb = 0; render(); body.scrollTop = 0; }
+});
+
+function openSearch() {
+  view = 'agents';
+  if (query === null) query = '';
+  kb = 0;
+  sig = '';
+  render();
+  const q = $('#q');
+  if (q) { q.focus(); q.select(); }
+}
+
+function closeSearch() {
+  query = null;
+  sig = '';
+  if (document.activeElement) document.activeElement.blur();
+  render();
+  selectTop();
+}
+
+// keys while the search box has focus: it keeps the letters, so moving is arrows or Ctrl+j/k/n/p
+function searchKey(e) {
+  const down = e.key === 'ArrowDown' || (e.ctrlKey && (e.key === 'j' || e.key === 'n'));
+  const up = e.key === 'ArrowUp' || (e.ctrlKey && (e.key === 'k' || e.key === 'p'));
+  if (down || up) { e.preventDefault(); step(down ? 1 : -1); }
+  else if (e.key === 'Enter') { const row = body.querySelectorAll('.row')[Math.max(kb, 0)]; if (row) jump(row.dataset.jump); }
+  else if (e.key === 'Escape') { e.preventDefault(); if (query) { query = ''; kb = 0; render(); } else closeSearch(); }
+  else if (e.key === 'Tab') e.preventDefault();
+}
 
 document.addEventListener('keydown', (e) => {
   if (!expanded) return;
@@ -335,6 +385,8 @@ document.addEventListener('keydown', (e) => {
   if (e.target.closest && e.target.closest('#sheet, #webmenu')) return;
   if (WEB && document.querySelector('#sheet.show')) return;
   const typing = e.target.tagName === 'INPUT';
+  if (e.target.id === 'q') return searchKey(e);
+  if (e.key === 'Escape' && query !== null && !typing) { closeSearch(); return; }
   if (e.key === 'Escape') { if (typing) e.target.blur(); else collapse(); return; }
   if (typing) { if (e.key === 'Enter' && e.target.id === 'reply') sendReply(); return; }
   const p = view === 'inbox' && inbox().length ? find(cur) : null;
@@ -346,7 +398,8 @@ document.addEventListener('keydown', (e) => {
   else if (e.key === 'Enter') {
     if (p) jump(p.key);
     else if (kb >= 0) { const row = body.querySelectorAll('.row')[kb]; if (row) jump(row.dataset.jump); }
-  } else if (e.key === 'r' || e.key === '/') {
+  } else if (e.key === '/') { e.preventDefault(); openSearch(); }
+  else if (e.key === 'r') {
     // from the agent list, reply to the selected agent if it's waiting in the inbox
     if (view === 'agents' && kb >= 0) {
       const row = body.querySelectorAll('.row')[kb];

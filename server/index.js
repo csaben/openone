@@ -104,6 +104,7 @@ const TYPES = { '.css': 'text/css', '.js': 'text/javascript', '.svg': 'image/svg
 const STATIC = {
   '/style.css': path.join(ROOT, 'src', 'ui', 'style.css'),
   '/app.js': path.join(ROOT, 'src', 'ui', 'app.js'),
+  '/search.js': path.join(ROOT, 'src', 'ui', 'search.js'),
   '/web.js': path.join(__dirname, 'web', 'web.js'),
   '/chat.js': path.join(__dirname, 'web', 'chat.js'),
   '/web.css': path.join(__dirname, 'web', 'web.css'),
