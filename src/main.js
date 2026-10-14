@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, screen, globalShortcut, Notification, Tray, Menu, nativeImage, nativeTheme, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, screen, powerMonitor, globalShortcut, Notification, Tray, Menu, nativeImage, nativeTheme, shell } = require('electron');
 const { execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
@@ -68,10 +68,38 @@ function display() {
   return typeof cfg.display === 'number' && all[cfg.display] ? all[cfg.display] : screen.getPrimaryDisplay();
 }
 
-function place() {
+function bounds() {
   const a = display().workArea;
   const [w, h] = SIZES[size];
-  win.setBounds({ x: a.x + a.width - w, y: a.y + Math.round((a.height - h) / 2), width: w, height: h });
+  return { x: a.x + a.width - w, y: a.y + Math.round((a.height - h) / 2), width: w, height: h };
+}
+
+function place() {
+  if (win && !win.isDestroyed()) win.setBounds(bounds());
+}
+
+// Windows moves windows when monitors sleep, wake or reconnect, and display events
+// arrive before the layout settles. So place again a little later, and check every
+// few seconds that the dock is still flush with the edge.
+function settle() {
+  place();
+  setTimeout(place, 1000);
+  setTimeout(place, 4000);
+}
+
+function guard() {
+  if (!win || win.isDestroyed()) return;
+  const want = bounds();
+  const got = win.getBounds();
+  if (['x', 'y', 'width', 'height'].every((k) => got[k] === want[k])) return;
+  const note = JSON.stringify([got, want]);
+  if (note === guard.last) return place(); // log each kind of move once
+  guard.last = note;
+  try {
+    fs.appendFileSync(path.join(app.getPath('userData'), 'place.log'),
+      `${new Date().toISOString()} moved back from ${JSON.stringify(got)} to ${JSON.stringify(want)} (${size})\n`);
+  } catch {}
+  place();
 }
 
 function createWindow() {
@@ -86,8 +114,9 @@ function createWindow() {
   win.loadFile(path.join(__dirname, 'ui', 'index.html'));
   win.once('ready-to-show', () => win.showInactive());
   win.on('blur', () => win.webContents.send('collapse'));
-  screen.on('display-metrics-changed', place);
-  screen.on('display-removed', place);
+  for (const ev of ['display-metrics-changed', 'display-added', 'display-removed']) screen.on(ev, settle);
+  for (const ev of ['resume', 'unlock-screen']) powerMonitor.on(ev, settle);
+  setInterval(guard, 3000);
 }
 
 function state() {
