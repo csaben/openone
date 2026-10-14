@@ -267,7 +267,7 @@ function projectCard() {
   const run = p.create || !p.host ? [] : running(p.host, p.name);
   const html = `${head(`${esc(p.name)}${p.host ? ` <span class="on-host">· ${esc(p.host)}</span>` : ''}`)}<div class="where">${where}</div>
     ${opts.map((o, i) => `<div class="opt2 ${i === proj.row ? 'kb' : ''}" data-row="${i}"><span class="lbl">${o.label}</span>${chips(o.values, value(o), i)}</div>`).join('')}
-    ${run.length ? `<div class="already">Already running here: ${run.map((x) => `<button class="go2" data-jump="${esc(x.key)}">${esc(x.kind)} · ${esc(x.session)}</button>`).join(' ')}</div>` : ''}
+    ${run.length ? `<div class="already">Already running here: ${run.map((x) => `<button class="go2" data-jump="${esc(x.key)}">${esc(x.kind)} · ${esc(String(x.title || `window ${x.windowIndex}`).slice(0, 28))}</button>`).join(' ')}</div>` : ''}
     <div class="acts"><button class="start" data-start>Start ${esc(p.agent)}</button>${window.oo.code && !p.create ? '<button class="go2" data-code>VS Code</button>' : ''}</div>
     ${proj.busy ? `<div class="empty">${esc(proj.busy)}</div>` : ''}`;
   return { html, hint: `<kbd>←</kbd><kbd>→</kbd> change · <kbd>Enter</kbd> start${window.oo.code ? ' · <kbd>o</kbd> code' : ''}${run.length ? ' · <kbd>g</kbd> go' : ''} · <kbd>Esc</kbd> back` };
