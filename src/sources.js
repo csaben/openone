@@ -138,6 +138,52 @@ class TmuxSource {
     return pane;
   }
 
+  // Opens a window in the session a terminal is showing (the attached one, most recently
+  // active first), so it appears in that Windows Terminal tab, and types `line` into its
+  // shell. With no session at all, starts one. Returns the new pane.
+  async newWindow({ name, line }) {
+    if (!SESSION_NAME.test(name || '')) throw new Error('window name: letters, digits, _ . - only');
+    const [list] = await this.batch([['list-sessions', '-F', '#{session_attached} #{session_activity} #{session_name}']]);
+    const sessions = list.split('\n').map((l) => l.trim().match(/^(\d+) (\d+) (\S+)$/)).filter(Boolean)
+      .sort((a, b) => (Number(b[1] !== '0') - Number(a[1] !== '0')) || Number(b[2]) - Number(a[2]));
+    if (!sessions.length) return this.newSession({ name, cmd: line });
+    const session = sessions[0][3];
+    const [out] = await this.batch([['new-window', '-d', '-t', `${session}:`, '-n', name, '-P', '-F', FMT]]);
+    const pane = out.split('\n').map(parseRow).filter(Boolean)[0];
+    if (!pane) throw new Error(`could not open a window: ${out.trim().split('\n')[0] || 'no pane'}`);
+    pane.attached = sessions[0][1] !== '0';
+    await this.waitForPrompt(pane);
+    if (line) {
+      await this.text(pane, line);
+      await this.keys(pane, ['Enter']);
+    }
+    return pane;
+  }
+
+  // Keys typed before the shell is ready are lost (PowerShell takes a few seconds to load
+  // its profile), so wait until the last line looks like a prompt.
+  async waitForPrompt(pane, timeoutMs = this.cfg.shellReadyMs || 10000) {
+    const until = Date.now() + timeoutMs;
+    const min = this.cfg.shellWarmMs ?? 400;
+    await new Promise((r) => setTimeout(r, min));
+    while (Date.now() < until) {
+      const [text] = await this.batch([['capture-pane', '-p', '-t', this.target(pane)]]);
+      const last = text.replace(/\r/g, '').split('\n').map((l) => l.trimEnd()).filter(Boolean).pop() || '';
+      if (/(^PS .*>|[$#>%❯])$/.test(last)) return true;
+      await new Promise((r) => setTimeout(r, 300));
+    }
+    return false;
+  }
+
+  // the shell new windows start in, which decides how project commands are written
+  get shell() { return this.cfg.shell || (this.psmux ? 'powershell' : 'bash'); }
+
+  join(dir, name) { return this.psmux ? `${dir.replace(/[\\/]+$/, '')}\\${name}` : `${dir.replace(/\/+$/, '')}/${name}`; }
+
+  async resolve(dir) {
+    return /^~(?=$|[\\/])/.test(dir) ? (await this.home()) + dir.slice(1) : dir;
+  }
+
   async killSession(name) {
     if (!SESSION_NAME.test(name || '')) throw new Error('bad session name');
     await this.batch([['kill-session', '-t', name]]);
@@ -155,6 +201,20 @@ class LocalSource extends TmuxSource {
   get psmux() { return /psmux/i.test(this.bin); }
 
   async home() { return require('os').homedir(); }
+
+  // [{ name, mtime }] for the folders in dir, newest first
+  async listDirs(dir) {
+    const fs = require('fs');
+    const path = require('path');
+    const root = await this.resolve(dir);
+    const out = [];
+    for (const d of await fs.promises.readdir(root, { withFileTypes: true })) {
+      if (!d.isDirectory() || d.name.startsWith('.')) continue;
+      const st = await fs.promises.stat(path.join(root, d.name)).catch(() => null);
+      out.push({ name: d.name, mtime: st ? st.mtimeMs : 0 });
+    }
+    return out.sort((a, b) => b.mtime - a.mtime);
+  }
 
   run(args) {
     return new Promise((resolve) => {
@@ -284,6 +344,13 @@ class SshTmuxSource extends ShellSource {
   init() { return []; }
 
   render(argv) { return `tmux ${argv.map(sq).join(' ')} </dev/null 2>&1`; }
+
+  async listDirs(dir) {
+    const root = await this.resolve(dir);
+    const out = await this.exec([`find ${sq(root)} -mindepth 1 -maxdepth 1 -type d -not -name '.*' -printf '@@%T@ %f\\n' 2>/dev/null`]);
+    return out.split('\n').map((l) => l.match(/^@@([\d.]+) (.+)$/)).filter(Boolean)
+      .map((m) => ({ name: m[2], mtime: Number(m[1]) * 1000 })).sort((a, b) => b.mtime - a.mtime);
+  }
 }
 
 // Windows over ssh. In an ssh logon, PATH lookups can stall for minutes on a UNC entry
@@ -323,6 +390,14 @@ class SshPsmuxSource extends ShellSource {
       return /[\s<>|&^%#{}()]/.test(a) ? `"${a}"` : a;
     };
     return `"${bin}" ${argv.map(arg).join(' ')} 2>&1`;
+  }
+
+  async listDirs(dir) {
+    const root = await this.resolve(dir);
+    if (/["\r\n%]/.test(root)) throw new Error('bad workspace path');
+    const out = this.clean(await this.exec([`dir /b /ad "${root}" 2>nul`, 'echo @@END']));
+    return out.split(/\r?\n/).map((s) => s.trim()).filter((s) => s && s !== '@@END' && !s.startsWith('.') && !/^dir \/b/i.test(s))
+      .map((name) => ({ name, mtime: 0 }));
   }
 
   // drop the banner and the prompt cmd prints before every command

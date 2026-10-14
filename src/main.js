@@ -1,11 +1,12 @@
 const { app, BrowserWindow, ipcMain, screen, powerMonitor, globalShortcut, Notification, Tray, Menu, nativeImage, nativeTheme, shell } = require('electron');
-const { execFileSync } = require('child_process');
+const { execFileSync, spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const { Monitor } = require('./monitor');
 const { createSource } = require('./sources');
 const { WindowsTerminal } = require('./wt');
 const actions = require('./actions');
+const projects = require('./projects');
 const { detect: detectConfig } = require('./setup');
 
 // Installed builds keep config in %APPDATA%\openone; a source checkout uses ./config.json.
@@ -212,6 +213,45 @@ async function jump(key) {
   if (!res.ok) win.webContents.send('toast', `Couldn't find the ${r.h.cfg.name} tab in Windows Terminal`);
 }
 
+// ---------- projects ----------
+
+async function listProjects() {
+  return Promise.all(Object.values(hosts).map((h) => projects.list(h)
+    .catch((e) => ({ host: h.cfg.name, error: String(e.message || e).split('\n')[0], dirs: [] }))));
+}
+
+async function startProject(opts) {
+  const h = hosts[opts && opts.host];
+  if (!h) throw new Error('no such host');
+  const pane = await projects.start(h, cfg, opts);
+  win.webContents.send('collapse');
+  await h.src.focus(pane).catch(() => {});
+  const res = await wt.focus(h.cfg.wtTab, h.cfg.wtTabIndex);
+  if (!res.ok) win.webContents.send('toast', `Started, but couldn't find the ${h.cfg.name} tab in Windows Terminal`);
+  return `${h.cfg.name}|${pane.session}|${pane.paneId}`;
+}
+
+// { key } opens a pane's folder, { host, folder } a project's; remote hosts over Remote-SSH
+async function openInCode(target) {
+  let h;
+  let dir;
+  if (target && target.key) {
+    const r = lookup(target.key);
+    if (!r) throw new Error('no such pane');
+    h = r.h;
+    dir = r.p.path;
+  } else {
+    h = hosts[target && target.host];
+    if (!h) throw new Error('no such host');
+    dir = h.src.join(await h.src.resolve(projects.workspace(h.cfg)), projects.checkName(target.folder));
+  }
+  if (!dir || /["\r\n]/.test(dir)) throw new Error('no folder to open');
+  const args = projects.vscodeArgs(h.cfg, dir).map((a) => `"${a}"`);
+  // `code` is a .cmd, so it needs a shell; the folder was checked for quotes above
+  spawn(`${cfg.vscode || 'code'} ${args.join(' ')}`, { shell: true, detached: true, stdio: 'ignore', windowsHide: true }).unref();
+  win.webContents.send('collapse');
+}
+
 async function answer(key, n) {
   const r = lookup(key);
   if (!r) return;
@@ -309,6 +349,9 @@ app.whenReady().then(() => {
   ipcMain.handle('pane:jump', (_e, key) => jump(key));
   ipcMain.handle('pane:answer', (_e, key, n) => answer(key, n));
   ipcMain.handle('pane:reply', (_e, key, text) => reply(key, text));
+  ipcMain.handle('project:list', () => listProjects());
+  ipcMain.handle('project:start', (_e, opts) => startProject(opts));
+  ipcMain.handle('project:code', (_e, target) => openInCode(target));
   ipcMain.on('pane:seen', (_e, key) => { monitor.markSeen(key); push(); });
 });
 

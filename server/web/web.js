@@ -219,7 +219,8 @@
     const notif = !('Notification' in window) ? '' : Notification.permission === 'granted'
       ? `<button data-a="mute">${muted ? 'Unmute' : 'Mute'} notifications</button>`
       : '<button data-a="notify">Enable notifications</button>';
-    menu.innerHTML = `<button data-a="new">New session…</button>
+    menu.innerHTML = `<button data-a="project">Start or continue a project…</button>
+      <button data-a="new">New session…</button>
       <button data-a="shells">${showShells ? 'Hide' : 'Show'} shells</button>${notif}`;
     menu.classList.toggle('show');
   }
@@ -232,6 +233,7 @@
     if (a === 'mute') { muted = !muted; store.set('muted', muted); emitState(); }
     if (a === 'notify') Notification.requestPermission();
     if (a === 'new') newSession();
+    if (a === 'project' && window.ooProjects) window.ooProjects();
   });
 
   document.addEventListener('click', (e) => {
@@ -273,6 +275,8 @@
     answer: (key, n) => call('POST', `api/panes/${enc(key)}/answer`, { n }).catch((e) => toast(e.message)),
     reply: (key, text) => call('POST', `api/panes/${enc(key)}/reply`, { text }).catch((e) => toast(e.message)),
     seen: (key) => call('POST', `api/panes/${enc(key)}/seen`).catch(() => {}),
+    projects: () => call('GET', 'api/projects'),
+    startProject: async (opts) => { const r = await call('POST', 'api/projects', opts); viewer(r.key); return r.key; },
   };
 
   document.addEventListener('keydown', (e) => {

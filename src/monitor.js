@@ -90,7 +90,7 @@ class Monitor {
       key: p.key, host: p.host, session: p.session, windowIndex: p.windowIndex, paneId: p.paneId,
       kind: p.kind || null, state: p.state, label: p.label, title: p.title, active: p.active,
       since: p.since, unseen: p.unseen, question: p.question, topic: p.topic, detail: p.detail, options: p.options,
-      summary: p.summary, doneAt: p.doneAt,
+      summary: p.summary, doneAt: p.doneAt, path: p.path,
     }));
   }
 }

@@ -12,6 +12,7 @@ const path = require('path');
 const { createSource } = require('../src/sources');
 const { Monitor } = require('../src/monitor');
 const actions = require('../src/actions');
+const projects = require('../src/projects');
 
 const ROOT = path.join(__dirname, '..');
 const CONFIG = process.env.OPENONE_CONFIG || path.join(__dirname, 'config.json');
@@ -140,6 +141,23 @@ async function api(req, res, parts) {
   const m = req.method;
   if (m === 'GET' && a === 'state') return send(res, 200, state());
   if (m === 'GET' && a === 'hosts') return send(res, 200, state().hosts);
+
+  if (a === 'projects' && !b) {
+    if (m === 'GET') {
+      return send(res, 200, await Promise.all(Object.values(hosts).map((h) => projects.list(h)
+        .catch((e) => ({ host: h.cfg.name, error: String(e.message || e).split('\n')[0], dirs: [] })))));
+    }
+    if (m === 'POST') {
+      const body = await readJson(req);
+      const h = hosts[String(body.host || '')];
+      if (!h) return send(res, 404, { error: 'no such host' });
+      const np = await projects.start(h, cfg, {
+        folder: String(body.folder || ''), create: !!body.create, agent: String(body.agent || 'claude'), resume: !!body.resume,
+      });
+      await refresh(h);
+      return send(res, 201, { key: `${h.cfg.name}|${np.session}|${np.paneId}` });
+    }
+  }
 
   if (m === 'GET' && a === 'events') {
     res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' });
