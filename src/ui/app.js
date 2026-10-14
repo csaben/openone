@@ -13,6 +13,7 @@ let kb = -1;
 let sig = '';
 let peekKey = null;
 let peekTimer = null;
+let hintTimer = null;
 const drafts = {};
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -159,14 +160,21 @@ function render() {
     const focused = document.activeElement && document.activeElement.id === 'reply';
     const caret = focused ? document.activeElement.selectionStart : 0;
     body.innerHTML = html;
-    $('#hint').innerHTML = `<span>${hint}</span>`;
+    if ($('#hint').dataset.text !== hint) { $('#hint').innerHTML = `<span>${hint}</span>`; $('#hint').dataset.text = hint; showHint(!!hint); }
     sig = next;
     if (focused && $('#reply')) { $('#reply').focus(); $('#reply').setSelectionRange(caret, caret); }
   }
-  $('#hint').classList.toggle('show', !!hint);
   $('#b-inbox').classList.toggle('on', !!showInbox);
   $('#b-agents').classList.toggle('on', !showInbox);
   layout();
+}
+
+// The key hint is a reminder, not a control: show it for a few seconds when the card
+// opens or its keys change, then get out of the way.
+function showHint(on) {
+  clearTimeout(hintTimer);
+  $('#hint').classList.toggle('show', on);
+  if (on) hintTimer = setTimeout(() => $('#hint').classList.remove('show'), 4000);
 }
 
 function layout() {
@@ -189,6 +197,7 @@ function expand(v, key) {
   root.classList.replace('collapsed', 'expanded');
   hidePeek();
   sig = '';
+  $('#hint').dataset.text = '';
   render();
   window.oo.focus();
 }
@@ -197,6 +206,7 @@ function collapse() {
   if (!expanded || WEB) return;
   expanded = false;
   root.classList.replace('expanded', 'collapsed');
+  showHint(false);
   fit();
   if (document.activeElement) document.activeElement.blur();
   render();

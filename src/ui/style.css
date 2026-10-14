@@ -153,12 +153,12 @@ svg circle[r=".9"] { fill: currentColor; stroke: none; }
 /* ---------- hint pill ---------- */
 #hint {
   position: absolute; right: 68px; width: 384px; display: flex; justify-content: center; pointer-events: none;
-  opacity: 0; transition: opacity .15s ease;
+  opacity: 0; transition: opacity .4s ease;
 }
 #root.expanded #hint.show { opacity: 1; }
 #hint span {
   background: rgba(27, 28, 32, .96); border: 1px solid var(--edge); border-radius: 20px; padding: 7px 14px;
-  font-size: 12.5px; color: #d9dbe0; box-shadow: 0 8px 24px rgba(0, 0, 0, .4); pointer-events: auto;
+  font-size: 12.5px; color: #d9dbe0; box-shadow: 0 8px 24px rgba(0, 0, 0, .4);
 }
 kbd { font-family: var(--sans); font-size: 10.5px; font-weight: 600; background: #2d2e33; border: 1px solid rgba(255, 255, 255, .06); border-radius: 4px; padding: 1px 6px; margin: 0 2px; color: var(--text); }
 
