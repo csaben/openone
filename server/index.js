@@ -54,8 +54,15 @@ async function refresh(h) {
   pushState();
 }
 
+// A host with "feed": true is read by the desktop app on that machine, which posts its
+// snapshots here (see POST /api/hosts/:host/snapshot), so the panes are read once, not
+// twice: on psmux every read can flash the terminal. Polls itself only while no feed
+// has arrived for feedStaleMs.
+const fedRecently = (h) => h.cfg.feed && Date.now() - (h.fedAt || 0) < (h.cfg.feedStaleMs || 20000);
+
 async function poll(h) {
   for (;;) {
+    if (fedRecently(h)) { await sleep(h.cfg.pollMs || 1500); continue; }
     try {
       await refresh(h);
       await sleep(h.cfg.pollMs || 1500);
@@ -93,10 +100,10 @@ function send(res, code, body, type = 'application/json') {
   res.end(data);
 }
 
-function readJson(req) {
+function readJson(req, limit = 1e6) {
   return new Promise((resolve, reject) => {
     let raw = '';
-    req.on('data', (d) => { raw += d; if (raw.length > 1e6) req.destroy(); });
+    req.on('data', (d) => { raw += d; if (raw.length > limit) req.destroy(); });
     req.on('end', () => { try { resolve(raw ? JSON.parse(raw) : {}); } catch (e) { reject(new Error('bad json')); } });
   });
 }
@@ -192,6 +199,25 @@ async function api(req, res, parts) {
       pushState();
       return send(res, 200, { ok: true });
     }
+  }
+
+  if (m === 'POST' && a === 'hosts' && b && c === 'snapshot') {
+    const h = hosts[decodeURIComponent(b)];
+    if (!h || !h.cfg.feed) return send(res, 404, { error: 'not a fed host' });
+    const body = await readJson(req, 8e6);
+    if (!Array.isArray(body.panes)) return send(res, 400, { error: 'panes: array' });
+    const str = (v) => String(v ?? '');
+    const raws = body.panes.filter((p) => p && /^%\d+$/.test(str(p.paneId))).map((p) => ({
+      paneId: str(p.paneId), session: str(p.session), windowIndex: str(p.windowIndex), windowName: str(p.windowName),
+      paneIndex: str(p.paneIndex), command: str(p.command), path: str(p.path), title: str(p.title),
+      windowActive: str(p.windowActive), paneActive: str(p.paneActive), attached: !!p.attached, sig: str(p.sig), text: str(p.text),
+    }));
+    h.fedAt = Date.now();
+    h.ok = true;
+    h.error = '';
+    for (const ev of monitor.ingest(h.cfg.name, raws)) broadcast('peek', ev);
+    pushState();
+    return send(res, 200, { ok: true });
   }
 
   if (a === 'hosts' && b && c === 'sessions') {

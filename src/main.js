@@ -174,6 +174,7 @@ async function pollHost(h) {
       h.error = '';
       for (const ev of monitor.ingest(h.cfg.name, raws)) notify(ev);
       push();
+      publish(h, raws);
       await sleep(h.cfg.pollMs || 1500);
     } catch (e) {
       h.ok = false;
@@ -183,6 +184,23 @@ async function pollHost(h) {
       await sleep(Math.max(5000, h.cfg.pollMs || 1500));
     }
   }
+}
+
+// "publish": { "url": "https://server", "hosts": ["this-pc"] } sends this machine's pane
+// snapshots to an openone server whose config marks the host "feed": true, so the server
+// doesn't read the same panes again (each psmux read can flash the terminal). Sends on
+// change, or every 8s as a heartbeat; one request at a time.
+function publish(h, raws) {
+  const pub = cfg.publish;
+  if (!pub || !pub.url || !(pub.hosts || []).includes(h.cfg.name) || h.publishing) return;
+  const body = JSON.stringify({ panes: raws });
+  if (body === h.published && Date.now() - (h.publishedAt || 0) < 8000) return;
+  h.publishing = true;
+  fetch(`${pub.url.replace(/\/$/, '')}/api/hosts/${encodeURIComponent(h.cfg.name)}/snapshot`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body, signal: AbortSignal.timeout(5000),
+  }).then((r) => { if (r.ok) { h.published = body; h.publishedAt = Date.now(); } })
+    .catch(() => {})
+    .finally(() => { h.publishing = false; });
 }
 
 function startHosts() {
