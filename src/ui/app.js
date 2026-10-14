@@ -121,7 +121,7 @@ function inboxCard(items) {
   const hint = p.state === 'input' && n
     ? `Press ${n <= 3 ? (p.options.map((o) => `<kbd>${o.n}</kbd>`).join(n === 3 ? ', ' : ' or ').replace(/, (?=[^,]*$)/, ' or ')) : `<kbd>1</kbd> – <kbd>${n}</kbd>`} to answer`
     : `<kbd>Enter</kbd> ${OPEN_HINT}${items.length > 1 ? ' · <kbd>j</kbd><kbd>k</kbd> next' : ''}`;
-  return { html, hint };
+  return { html, hint: `${hint} · <kbd>r</kbd> reply · <kbd>Tab</kbd> list` };
 }
 
 function agentsCard() {
@@ -146,7 +146,8 @@ function agentsCard() {
     return head + (rows || (h.ok ? '<div class="empty">No panes</div>' : ''));
   }).join('');
   const html = `<div class="head"><h1>Agents${parts.length ? ` <span style="color:var(--muted);font-weight:500;font-size:12.5px">· ${parts.join(' · ')}</span>` : ''}</h1><button class="x" data-close>${X}</button></div>${groups}`;
-  return { html, hint: `<kbd>j</kbd><kbd>k</kbd> pick · <kbd>Enter</kbd> ${OPEN_HINT}` };
+  const n = inbox().length;
+  return { html, hint: `<kbd>j</kbd><kbd>k</kbd> pick · <kbd>Enter</kbd> ${OPEN_HINT}${n ? ` · <kbd>Tab</kbd> inbox (${n})` : ''}` };
 }
 
 function render() {
@@ -199,6 +200,7 @@ function expand(v, key) {
   sig = '';
   $('#hint').dataset.text = '';
   render();
+  if (view === 'agents') selectTop();
   window.oo.focus();
 }
 
@@ -241,6 +243,21 @@ function sendReply() {
   window.oo.reply(key, text);
   seenLocally(key);
   render();
+}
+
+function switchView() {
+  view = view === 'agents' && inbox().length ? 'inbox' : 'agents';
+  kb = -1;
+  sig = '';
+  render();
+  if (view === 'agents') selectTop();
+}
+
+function selectTop() {
+  const top = S.panes.slice().sort(byPriority)[0];
+  const rows = [...body.querySelectorAll('.row')];
+  kb = Math.max(0, rows.findIndex((r) => top && r.dataset.jump === top.key));
+  if (rows.length) render();
 }
 
 function step(d) {
@@ -323,19 +340,31 @@ document.addEventListener('keydown', (e) => {
   const p = view === 'inbox' && inbox().length ? find(cur) : null;
   if (p && p.state === 'input' && /^[1-9]$/.test(e.key) && (p.options || []).some((o) => o.n === Number(e.key))) {
     answer(p.key, Number(e.key));
-  } else if (e.key === 'Tab' || e.key === 'ArrowDown' || e.key === 'ArrowRight' || e.key === 'j') { e.preventDefault(); step(1); }
+  } else if (e.key === 'Tab' || e.key === 'a') { e.preventDefault(); switchView(); }
+  else if (e.key === 'ArrowDown' || e.key === 'ArrowRight' || e.key === 'j') { e.preventDefault(); step(1); }
   else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft' || e.key === 'k') { e.preventDefault(); step(-1); }
   else if (e.key === 'Enter') {
     if (p) jump(p.key);
     else if (kb >= 0) { const row = body.querySelectorAll('.row')[kb]; if (row) jump(row.dataset.jump); }
-  } else if (e.key === 'a') { view = view === 'agents' ? 'inbox' : 'agents'; kb = -1; render(); }
-  else if (e.key === 'r' || e.key === '/') { const r = $('#reply'); if (r) { e.preventDefault(); r.focus(); } }
+  } else if (e.key === 'r' || e.key === '/') {
+    // from the agent list, reply to the selected agent if it's waiting in the inbox
+    if (view === 'agents' && kb >= 0) {
+      const row = body.querySelectorAll('.row')[kb];
+      if (!row || !inbox().some((x) => x.key === row.dataset.jump)) return;
+      cur = row.dataset.jump;
+      view = 'inbox';
+      sig = '';
+      render();
+    }
+    const r = $('#reply');
+    if (r) { e.preventDefault(); r.focus(); }
+  }
 });
 
 window.oo.on('state', (s) => { S = s; render(); });
 window.oo.on('peek', peek);
 window.oo.on('collapse', collapse);
-window.oo.on('expand', () => expand());
+window.oo.on('expand', () => expand('agents'));
 window.oo.on('toast', (msg) => {
   const t = $('#toast');
   t.textContent = msg;
