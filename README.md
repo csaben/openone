@@ -32,7 +32,7 @@ That builds a one-click, per-user installer, installs openone, launches it and m
 
 On first run it writes `config.json` (to `%APPDATA%\openone` for an installed copy). psmux is turned on if it's installed, and every host in `~/.ssh/config` is added but turned off. Set `"enabled": true` on the ones you want, make each `wtTab` regex match that host's Windows Terminal tab title, then choose **Reload config** from the tray. See `config.example.json` for the shape.
 
-**Ctrl+Alt+Space** opens the panel. In the panel, **Enter** jumps to the pane, **Tab** moves to the next item and **Esc** closes it. The tray menu has mute, start at login and config.
+**Ctrl+Alt+Space** opens the panel. In the panel, **j**/**k** (or the arrow keys) move between items, **Enter** jumps to the pane and **Esc** closes it. Set `hotkey` in the config to change the shortcut. The tray menu has mute, start at login and config.
 
 ## Server (web and phone, experimental)
 

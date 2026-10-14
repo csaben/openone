@@ -237,6 +237,8 @@ function trayIcon() {
 
 function menuTemplate() {
   return [
+    { label: cfg.hotkey ? `Open panel  (${cfg.hotkey.replace('Control', 'Ctrl')})` : 'Open panel', click: toggle },
+    { type: 'separator' },
     { label: 'Show shells too', type: 'checkbox', checked: !!cfg.showShells, click: () => { cfg.showShells = !cfg.showShells; push(); } },
     { label: 'Mute notifications', type: 'checkbox', checked: muted, click: () => { muted = !muted; push(); } },
     { label: 'Reload config', click: () => { loadConfig(); place(); startHosts(); } },
@@ -282,7 +284,13 @@ app.whenReady().then(() => {
   nativeTheme.on('updated', () => tray.setImage(trayIcon()));
   tray.setContextMenu(Menu.buildFromTemplate(menuTemplate()));
   tray.on('right-click', () => tray.setContextMenu(Menu.buildFromTemplate(menuTemplate())));
-  if (cfg.hotkey) globalShortcut.register(cfg.hotkey, toggle);
+  if (cfg.hotkey) {
+    let ok = false;
+    try { ok = globalShortcut.register(cfg.hotkey, toggle); } catch {}
+    if (!ok) {
+      new Notification({ title: 'openone hotkey not set', body: `${cfg.hotkey} is taken by another app or not a valid key. Change "hotkey" in the config.`, icon: toastIcon() }).show();
+    }
+  }
   if (process.env.OO_EXPAND) setTimeout(toggle, 4000);
   if (firstRun) welcome();
   // An installed copy starts at login by default, once. Turning it off in the tray sticks.
