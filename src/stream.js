@@ -54,6 +54,7 @@ class SessionStream {
       if (m) {
         const p = this.pane(m[1]);
         const data = unescape(m[2]);
+        p.lastOutput = Date.now();
         if (p.seeding) p.pending.push(data);
         else p.term.write(data);
       } else if (/^%exit\b/.test(line)) {
@@ -153,6 +154,12 @@ class SessionStream {
       else out.push(s);
     }
     return out.join('\n');
+  }
+
+  // when the pane last printed anything (0 if not since attaching)
+  lastOutput(id) {
+    const p = this.panes.get(id);
+    return (p && p.lastOutput) || 0;
   }
 
   // the same with colors, as ANSI escapes (for the web viewer)

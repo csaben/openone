@@ -27,11 +27,23 @@ const ICON = {
 const X = '<svg viewBox="0 0 16 16"><path d="m4 4 8 8M12 4l-8 8"/></svg>';
 const OPEN = '<svg viewBox="0 0 16 16"><path d="M9.5 3H13v3.5M13 3 7.5 8.5M11.5 9.5V12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5.5a1 1 0 0 1 1-1h2.5"/></svg>';
 const SEND = '<svg viewBox="0 0 16 16"><path d="M13.5 2.5 7 9M13.5 2.5l-4 11-2.5-4.5-4.5-2.5Z"/></svg>';
-const ORDER = { input: 0, done: 1, working: 2, idle: 3, shell: 4 };
 
 const status = (p) => (p.state === 'idle' && p.unseen ? 'done' : p.state);
 const name = (p) => `${p.kind || 'shell'} · ${p.label}`;
-const byPriority = (a, b) => ORDER[status(a)] - ORDER[status(b)] || b.since - a.since;
+// Agents that need you first (waiting, then just finished), then the rest by when they
+// were last used, shells last. "Last used" is the latest output or activity openone saw,
+// or for a pane it hasn't seen do anything yet, the agent's own "done at" time.
+const RANK = { input: 0, done: 1, working: 2, idle: 2, shell: 3 };
+function doneTime(s) {
+  const m = String(s || '').match(/(\d{1,2}):(\d{2})\s*([AP])M/i);
+  if (!m) return 0;
+  const d = new Date();
+  d.setHours((Number(m[1]) % 12) + (/p/i.test(m[3]) ? 12 : 0), Number(m[2]), 0, 0);
+  if (d.getTime() > Date.now() + 60000) d.setDate(d.getDate() - 1); // a time later than now was yesterday
+  return d.getTime();
+}
+const lastUsed = (p) => Math.max(p.used || 0, doneTime(p.doneAt));
+const byPriority = (a, b) => RANK[status(a)] - RANK[status(b)] || lastUsed(b) - lastUsed(a) || b.since - a.since;
 const inbox = () => S.panes.filter((p) => p.unseen && p.kind).sort(byPriority);
 const find = (key) => S.panes.find((p) => p.key === key);
 

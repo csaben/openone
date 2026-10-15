@@ -46,6 +46,8 @@ class Monitor {
         paneId: raw.paneId, path: raw.path, command: raw.command,
         active: raw.windowActive === '1' && raw.paneActive === '1' && raw.attached !== false,
         label: label(raw), title: title(raw, this.hostNames) || p.title || '', bg: raw.bg || null,
+        // when it was last used: output or tmux activity (never moves backwards)
+        used: Math.max(p.used || 0, raw.activity || 0),
       });
       if (d.kind) p.kind = d.kind;
 
@@ -84,7 +86,7 @@ class Monitor {
 
   markSeen(key) {
     const p = this.panes.get(key);
-    if (p) p.unseen = false;
+    if (p) { p.unseen = false; p.used = Date.now(); } // opening, answering or replying is using it
   }
 
   view() {
@@ -92,7 +94,7 @@ class Monitor {
       key: p.key, host: p.host, session: p.session, windowIndex: p.windowIndex, paneId: p.paneId,
       kind: p.kind || null, state: p.state, label: p.label, title: p.title, active: p.active,
       since: p.since, unseen: p.unseen, question: p.question, topic: p.topic, detail: p.detail, options: p.options,
-      summary: p.summary, doneAt: p.doneAt, path: p.path, bg: p.bg,
+      summary: p.summary, doneAt: p.doneAt, path: p.path, bg: p.bg, used: p.used || 0,
     }));
   }
 }
