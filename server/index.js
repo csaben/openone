@@ -15,14 +15,14 @@ const actions = require('../src/actions');
 const projects = require('../src/projects');
 const { Embedder, semantic, projectText } = require('../src/embed');
 
-// meaning-based project search; the model and vectors live in ~/.cache/openone
-const embedder = cfg.semantic === false ? null : new Embedder(path.join(require('os').homedir(), '.cache', 'openone'));
-let lastProjects = [];
 
 const ROOT = path.join(__dirname, '..');
 const CONFIG = process.env.OPENONE_CONFIG || path.join(__dirname, 'config.json');
 const cfg = JSON.parse(fs.readFileSync(CONFIG, 'utf8'));
 const PORT = Number(process.env.PORT || cfg.port || 8950);
+// meaning-based project search; the model and vectors live in ~/.cache/openone
+const embedder = cfg.semantic === false ? null : new Embedder(path.join(require('os').homedir(), '.cache', 'openone'));
+let lastProjects = [];
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const monitor = new Monitor({ hostNames: cfg.hosts.map((h) => h.name) });
