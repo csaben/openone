@@ -31,8 +31,9 @@ const SEND = '<svg viewBox="0 0 16 16"><path d="M13.5 2.5 7 9M13.5 2.5l-4 11-2.5
 const status = (p) => (p.state === 'idle' && p.unseen ? 'done' : p.state);
 const name = (p) => `${p.kind || 'shell'} · ${p.label}`;
 // Agents that need you first (waiting, then just finished), then the rest by when they
-// were last used, shells last. "Last used" is the latest output or activity openone saw,
-// or for a pane it hasn't seen do anything yet, the agent's own "done at" time.
+// were last used, shells last. "Last used": working now, or the last turn openone saw
+// start or finish, or you opened/answered/replied, or the agent's own "done at" time,
+// which is also the time each idle row shows.
 const RANK = { input: 0, done: 1, working: 2, idle: 2, shell: 3 };
 function doneTime(s) {
   const m = String(s || '').match(/(\d{1,2}):(\d{2})\s*([AP])M/i);
@@ -42,7 +43,7 @@ function doneTime(s) {
   if (d.getTime() > Date.now() + 60000) d.setDate(d.getDate() - 1); // a time later than now was yesterday
   return d.getTime();
 }
-const lastUsed = (p) => Math.max(p.used || 0, doneTime(p.doneAt));
+const lastUsed = (p) => (p.state === 'working' ? Date.now() : Math.max(p.used || 0, doneTime(p.doneAt)));
 const byPriority = (a, b) => RANK[status(a)] - RANK[status(b)] || lastUsed(b) - lastUsed(a) || b.since - a.since;
 const inbox = () => S.panes.filter((p) => p.unseen && p.kind).sort(byPriority);
 const find = (key) => S.panes.find((p) => p.key === key);

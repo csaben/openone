@@ -46,8 +46,6 @@ class Monitor {
         paneId: raw.paneId, path: raw.path, command: raw.command,
         active: raw.windowActive === '1' && raw.paneActive === '1' && raw.attached !== false,
         label: label(raw), title: title(raw, this.hostNames) || p.title || '', bg: raw.bg || null,
-        // when it was last used: output or tmux activity (never moves backwards)
-        used: Math.max(p.used || 0, raw.activity || 0),
       });
       if (d.kind) p.kind = d.kind;
 
@@ -58,6 +56,8 @@ class Monitor {
         const prev = p.state;
         p.state = d.state;
         p.since = now;
+        p.used = now; // a turn started, finished or asked something: it's in use
+        // (raw output isn't a sign of use: background timers redraw idle panes)
         if (d.state === 'input') { p.unseen = true; events.push({ type: 'input', key }); }
         else if (d.state === 'idle' && prev === 'working') { p.unseen = true; events.push({ type: 'done', key }); }
         else if (d.state === 'working') p.unseen = false;

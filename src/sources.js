@@ -18,7 +18,7 @@ const { Background, ID: BG_ID } = require('./bg');
 const SEP = '<|>';
 const FIELDS = ['pane_id', 'session_name', 'window_index', 'window_name', 'pane_index', 'pane_current_command',
   'pane_current_path', 'pane_title', 'window_active', 'pane_active', 'session_attached',
-  'history_size', 'cursor_x', 'cursor_y', 'pane_width', 'pane_height', 'alternate_on', 'window_activity'];
+  'history_size', 'cursor_x', 'cursor_y', 'pane_width', 'pane_height', 'alternate_on'];
 const REQUIRED = 14; // rows from before pane_width/pane_height still parse
 const FMT = FIELDS.map((f) => `#{${f}}`).join(SEP);
 const SESSION_NAME = /^[A-Za-z0-9_.-]{1,40}$/;
@@ -31,8 +31,7 @@ function parseRow(line) {
   return {
     paneId: v[0], session: v[1], windowIndex: v[2], windowName: v[3], paneIndex: v[4],
     command: v[5], path: v[6], title: v[7], windowActive: v[8], paneActive: v[9], attached: v[10] !== '0',
-    sig: `${v[11]}/${v[12]}/${v[13]}`, width: v[14], height: v[15], alt: v[16] === '1', cursor: [Number(v[12]), Number(v[13])],
-    activity: Number(v[17]) * 1000 || 0, text: '',
+    sig: `${v[11]}/${v[12]}/${v[13]}`, width: v[14], height: v[15], alt: v[16] === '1', cursor: [Number(v[12]), Number(v[13])], text: '',
   };
 }
 
@@ -107,7 +106,6 @@ class TmuxSource {
         p.attached = real.has(p.session);
         const st = this.streams.get(p.session);
         if (!st || !st.alive) continue;
-        p.activity = Math.max(p.activity || 0, st.lastOutput(p.paneId));
         if (st.ready(p.paneId)) { p.text = st.text(p.paneId, n); streamed.add(p); continue; }
         // A pane that hasn't printed since the client attached has an unknown screen, so it's
         // read once with capture-pane. One pane per poll: a burst of captures flashes.

@@ -68,14 +68,15 @@ test('a turn that finishes between polls still fires done', () => {
   assert.deepEqual(m.ingest('h', idle('Worked for 1s')), []);
 });
 
-test('monitor: last used follows activity and opening, never moves back', () => {
+test('monitor: last used is set by state changes and by opening, not by output', () => {
   const { Monitor } = require('../src/monitor');
   const m = new Monitor();
-  const raw = (activity) => ({ paneId: '%1', session: 's', windowIndex: '1', text: '', activity });
-  m.ingest('h', [raw(1000)]);
-  m.ingest('h', [raw(5000)]);
-  m.ingest('h', [raw(2000)]);
-  assert.equal(m.view()[0].used, 5000);
+  const raw = (text) => ({ paneId: '%1', session: 's', windowIndex: '1', text, command: 'claude' });
+  m.ingest('h', [raw('')], 1000);
+  assert.equal(m.view()[0].used, 0);
+  m.ingest('h', [raw('esc to interrupt')], 2000);
+  m.ingest('h', [raw('esc to interrupt')], 3000); // counts on the second poll
+  assert.equal(m.view()[0].used, 3000);
   m.markSeen('h|s|%1');
-  assert.ok(m.view()[0].used > 5000);
+  assert.ok(m.view()[0].used > 3000);
 });
