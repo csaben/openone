@@ -20,6 +20,20 @@ test('projects: start lines for bash and PowerShell', () => {
     "New-Item -ItemType Directory -Force -Path 'D:\\Code\\x' | Out-Null; Set-Location -LiteralPath 'D:\\Code\\x'; codex");
 });
 
+test('projects: the first message is quoted for the shell', () => {
+  assert.equal(P.commandLine('bash', '/h/x', true, 'claude', "clean my drive's \"photos\"\nfolder"),
+    "mkdir -p '/h/x' && cd '/h/x' && claude 'clean my drive'\\''s \"photos\" folder'");
+  assert.equal(P.commandLine('powershell', 'D:\\x', false, 'claude --continue', 'it\'s "done"'),
+    "Set-Location -LiteralPath 'D:\\x'; claude --continue 'it''s ''done'''");
+});
+
+test('projects: README notes become one line about the project', () => {
+  assert.equal(P.about('# gdrive\n\n![badge](x)\n\nKeeps my **Google Drive** tidy.\nDedupes [photos](p).\n\n## Setup\nrun it'),
+    'gdrive: Keeps my Google Drive tidy. Dedupes photos.');
+  assert.equal(P.about('{ "name": "x", "description": "A tool" }'), 'A tool');
+  assert.deepEqual(P.parseNotes('@@a\n# A\nfirst\n@@b\n'), { a: 'A: first', b: '' });
+});
+
 test('projects: VS Code opens remote folders over Remote-SSH', () => {
   assert.deepEqual(P.vscodeArgs({ type: 'ssh', ssh: 'me@box' }, '/home/me/Code/x'), ['--remote', 'ssh-remote+me@box', '/home/me/Code/x']);
   assert.deepEqual(P.vscodeArgs({ type: 'ssh', ssh: 'me@box', vscode: 'box' }, '/x'), ['--remote', 'ssh-remote+box', '/x']);

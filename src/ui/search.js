@@ -61,5 +61,43 @@
       .map((x) => x.p);
   }
 
-  return { score, filter };
+  // ---------- related work: "does something already do this?" ----------
+
+  const STOP = new Set(('a an the and or for of to in on at by with from into my me i we our you your it its this that these ' +
+    'is are be was want wanna need like make build start continue keep work working thing stuff some new project app tool ' +
+    'do does doing get set up using use via so just also please let lets').split(' '));
+
+  // "Google Drive maintenance" -> ['google', 'drive', 'mainten'] (crude stem, so maintain ~ maintenance)
+  function words(text) {
+    return String(text || '').toLowerCase().replace(/([a-z])([A-Z])/g, '$1 $2').split(/[^a-z0-9]+/)
+      .filter((w) => w.length >= 2 && !STOP.has(w))
+      .map((w) => (w.length > 5 ? w.replace(/(ances?|ences?|ings?|ations?|ers?|ed|es|s)$/, '') : w));
+  }
+
+  // docs: [{ name, text }]. Returns [{ doc, score, hits: [{ word, where }] }] for docs that
+  // look like the same work, best first. A name match counts most; words that appear in
+  // the description count once each.
+  function related(query, docs, { min = 2.5 } = {}) {
+    const q = [...new Set(words(query))];
+    if (!q.length) return [];
+    const out = [];
+    for (const doc of docs) {
+      const nameWords = words(String(doc.name || '').replace(/[-_.]/g, ' '));
+      const compact = String(doc.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      const text = new Set(words(doc.text));
+      let score = 0;
+      const hits = [];
+      for (const w of q) {
+        if (nameWords.some((n) => n === w || (w.length >= 3 && (n.startsWith(w) || w.startsWith(n) && n.length >= 3)))) { score += 3; hits.push({ word: w, where: 'name' }); }
+        else if (w.length >= 4 && compact.includes(w)) { score += 2.5; hits.push({ word: w, where: 'name' }); }
+        else if (text.has(w)) { score += 1; hits.push({ word: w, where: 'about' }); }
+      }
+      // most of what you said should be there, not one common word
+      const coverage = hits.length / q.length;
+      if (score >= min && (coverage >= 0.5 || score >= 6)) out.push({ doc, score: score * (0.5 + coverage), hits });
+    }
+    return out.sort((a, b) => b.score - a.score);
+  }
+
+  return { score, filter, words, related };
 });

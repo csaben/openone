@@ -159,7 +159,7 @@ async function api(req, res, parts) {
       const h = hosts[String(body.host || '')];
       if (!h) return send(res, 404, { error: 'no such host' });
       const np = await projects.start(h, cfg, {
-        folder: String(body.folder || ''), create: !!body.create, agent: String(body.agent || 'claude'), resume: !!body.resume,
+        folder: String(body.folder || ''), create: !!body.create, agent: String(body.agent || 'claude'), resume: !!body.resume, prompt: String(body.prompt || ''),
       });
       await refresh(h);
       return send(res, 201, { key: `${h.cfg.name}|${np.session}|${np.paneId}` });

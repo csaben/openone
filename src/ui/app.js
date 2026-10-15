@@ -164,8 +164,15 @@ function agentsCard() {
 }
 
 // ---------- projects: "n" starts or continues work in a workspace folder ----------
+//
+// Describe the work. Before offering to start fresh, it checks every host for work that
+// already covers it: agents whose title/summary match (Enter jumps there), and project
+// folders whose name or README match (with the words that matched). Then the confirm
+// step: name and host for a new folder, the agent, continue or new chat, and whether
+// what you typed goes to the agent as its first message.
 
-// proj: { q, list, at, sel, pick, row, busy }; pick: { name, host, create, agent, resume }
+// proj: { q, list, sel, pick, row, busy }
+// pick: { name, host, create, agent, resume, send, prompt }
 let proj = null;
 let projCache = null;
 const AGENT_KINDS = ['claude', 'codex'];
@@ -201,7 +208,7 @@ const counted = (panes) => Object.entries(panes.reduce((m, p) => ({ ...m, [p.kin
   .map(([k, n]) => `${n} ${esc(k)}`).join(', ');
 const running = (host, name) => S.panes.filter((p) => p.kind && p.host === host && base(p.path) === name.toLowerCase());
 
-// words naming a host pick that host; the rest is the project
+// words naming a host pick that host; the rest describes the work
 function projQuery() {
   const names = (proj.list || []).map((x) => x.host.toLowerCase());
   const words = proj.q.trim().split(/\s+/).filter(Boolean);
@@ -209,22 +216,63 @@ function projQuery() {
   return { host, text: words.filter((w) => w.toLowerCase() !== host).join(' ') };
 }
 
+const hostName = (lower) => (lower && (proj.list || []).find((x) => x.host.toLowerCase() === lower) || {}).host || null;
+
+// "google drive maintenance for my photos folder" -> "google-drive-maintenance"
+function suggestName(text) {
+  const keep = String(text).split(/\s+/).filter((w) => window.OOSearch.words(w).length).slice(0, 3);
+  return slug(keep.join(' ') || text) || 'project';
+}
+
+// the words of `text` that matched, in bold
+function marked(text, hits) {
+  const stems = hits.map((h) => h.word);
+  return esc(text).replace(/[A-Za-z0-9]+/g, (w) => (window.OOSearch.words(w).some((x) => stems.includes(x)) ? `<b>${w}</b>` : w));
+}
+
+// [{ type: 'agent'|'project'|'new', ... , section }]
 function projRows() {
   const { host, text } = projQuery();
   const all = (proj.list || []).filter((x) => !host || x.host.toLowerCase() === host)
-    .flatMap((x) => x.dirs.map((d) => ({ host: x.host, name: d.name, mtime: d.mtime })));
-  let rows;
-  if (!text) rows = all.slice().sort((a, b) => running(b.host, b.name).length - running(a.host, a.name).length || b.mtime - a.mtime);
-  else rows = all.map((r) => ({ r, s: window.OOSearch.score(text, { label: r.name }) })).filter((x) => x.s > 0)
-    .sort((a, b) => b.s - a.s || running(b.r.host, b.r.name).length - running(a.r.host, a.r.name).length || b.r.mtime - a.r.mtime)
-    .map((x) => x.r);
-  rows = rows.slice(0, 9);
-  const name = slug(text);
-  if (name && !all.some((r) => r.name.toLowerCase() === name)) {
-    const hostName = host && (proj.list || []).find((x) => x.host.toLowerCase() === host).host;
-    rows.push({ create: true, name, host: hostName || ((proj.list || []).length === 1 ? proj.list[0].host : null) });
+    .flatMap((x) => x.dirs.map((d) => ({ type: 'project', host: x.host, name: d.name, mtime: d.mtime, about: d.about || '' })));
+  if (!text) {
+    return all.sort((a, b) => running(b.host, b.name).length - running(a.host, a.name).length || b.mtime - a.mtime)
+      .slice(0, 9).map((r) => ({ ...r, section: 'Recent projects' }));
+  }
+  const S2 = window.OOSearch;
+  const agents = S2.related(text, S.panes.filter((p) => p.kind && (!host || p.host.toLowerCase() === host))
+    .map((p) => ({ name: p.label, text: [p.title, p.question, p.summary].join(' '), p })), { min: 2 })
+    .slice(0, 3).map((m) => ({ type: 'agent', p: m.doc.p, hits: m.hits, section: 'Already running' }));
+  const projects = S2.related(text, all.map((r) => ({ name: r.name, text: r.about, r })))
+    .slice(0, 6).map((m) => ({ ...m.doc.r, hits: m.hits, section: 'Existing projects' }));
+  const name = suggestName(text);
+  const rows = [...agents, ...projects];
+  if (!all.some((r) => r.name.toLowerCase() === name)) {
+    rows.push({ type: 'new', name, host: hostName(host) || ((proj.list || []).length === 1 ? proj.list[0].host : null), section: 'Start fresh' });
   }
   return rows;
+}
+
+function rowHtml(r, i) {
+  const cls = `row ${i === proj.sel ? 'kb' : ''}`;
+  if (r.type === 'agent') {
+    const p = r.p;
+    const line = p.title || p.summary || p.question || '';
+    return `<div class="${cls}" data-proj="${i}"><span class="st ${status(p)}"></span>
+      <div class="mid"><div class="t1"><span class="nm">${esc(p.label)}</span><span class="kind">${esc(p.kind)} · ${esc(p.host)}</span></div>
+      <div class="t2">${marked(line, r.hits)}</div></div><span class="go">${OPEN}</span></div>`;
+  }
+  if (r.type === 'new') {
+    return `<div class="${cls}" data-proj="${i}"><span class="st new"></span>
+      <div class="mid"><div class="t1"><span class="nm">＋ ${esc(r.name)}</span></div>
+      <div class="t2">New folder${r.host ? ` on ${esc(r.host)}` : ' · pick a host next'}</div></div></div>`;
+  }
+  const run = running(r.host, r.name);
+  const why = r.hits && r.about ? marked(r.about, r.hits) : esc(r.about);
+  return `<div class="${cls}" data-proj="${i}"><span class="st ${run.length ? 'live' : 'idle'}"></span>
+    <div class="mid"><div class="t1"><span class="nm">${r.hits ? marked(r.name, r.hits.filter((h) => h.where === 'name')) : esc(r.name)}</span>
+    <span class="kind">${esc(r.host)}${run.length ? ` · ${counted(run)} open` : ''}</span></div>
+    ${why ? `<div class="t2 about">${why}</div>` : ''}</div></div>`;
 }
 
 function chips(values, current, row) {
@@ -235,9 +283,11 @@ function chips(values, current, row) {
 function projectOptions() {
   const p = proj.pick;
   const opts = [];
+  if (p.create) opts.push({ key: 'name', label: 'Name' });
   if (p.create) opts.push({ key: 'host', label: 'Host', values: (proj.list || []).filter((x) => !x.error).map((x) => x.host) });
   opts.push({ key: 'agent', label: 'Agent', values: AGENT_KINDS });
   if (!p.create) opts.push({ key: 'resume', label: 'Chat', values: ['continue last', 'new chat'] });
+  if (p.prompt) opts.push({ key: 'send', label: 'Message', values: ['send it', "don't"] });
   return opts;
 }
 
@@ -247,61 +297,105 @@ function projectCard() {
     const rows = proj.list ? projRows() : [];
     proj.sel = Math.min(proj.sel, Math.max(rows.length - 1, 0));
     const errs = (proj.list || []).filter((x) => x.error).map((x) => `<div class="empty">${esc(x.host)}: ${esc(x.error)}</div>`).join('');
-    const list = !proj.list ? '<div class="empty">Reading folders…</div>' : rows.map((r, i) => {
-      const run = r.create ? [] : running(r.host, r.name);
-      const sub = r.create ? `New folder${r.host ? ` on ${esc(r.host)}` : ' · pick a host next'}`
-        : run.length ? `${esc(r.host)} · ${counted(run)} open here` : esc(r.host);
-      return `<div class="row ${i === proj.sel ? 'kb' : ''}" data-proj="${i}">
-        <span class="st ${r.create ? 'new' : run.length ? 'live' : 'idle'}"></span>
-        <div class="mid"><div class="t1"><span class="nm">${r.create ? '＋ ' : ''}${esc(r.name)}</span></div><div class="t2">${sub}</div></div></div>`;
-    }).join('') + errs || '<div class="empty">Type a name to start a new project</div>';
-    const html = `${head('Project')}<div class="search"><input id="pq" placeholder="What are you working on?  (add inari/cradle to pick)" spellcheck="false" autocomplete="off" value="${esc(proj.q)}"></div>${list}`;
+    const found = rows.filter((r) => r.type !== 'new' && r.section !== 'Recent projects').length;
+    const { text } = proj.list ? projQuery() : { text: '' };
+    const verdict = !text ? '' : found
+      ? `<div class="verdict">${found === 1 ? 'Something' : `${found} things`} might already cover this. Pick one to continue, or start fresh.</div>`
+      : '<div class="verdict fresh">Nothing like this yet on any machine. Start fresh below.</div>';
+    let section = '';
+    const list = !proj.list ? '<div class="empty">Looking through your projects…</div>' : rows.map((r, i) => {
+      const h = r.section !== section ? `<div class="host">${esc(r.section)}</div>` : '';
+      section = r.section;
+      return h + rowHtml(r, i);
+    }).join('') + errs || '<div class="empty">Describe what you want to work on</div>';
+    const html = `${head('What are you working on?')}<div class="search"><input id="pq" placeholder="e.g. google drive cleanup for my photos (add inari/cradle to pick)" spellcheck="false" autocomplete="off" value="${esc(proj.q)}"></div>${verdict}${list}`;
     return { html, hint: `<kbd>↑</kbd><kbd>↓</kbd> pick · <kbd>Enter</kbd> choose · <kbd>Esc</kbd> back` };
   }
   const p = proj.pick;
   const ws = (proj.list || []).find((x) => x.host === p.host);
-  const where = p.create ? `New folder${ws ? ` in ${esc(ws.workspace)}` : ''}` : esc(ws ? `${ws.workspace}${/\\/.test(ws.workspace) ? '\\' : '/'}${p.name}` : p.name);
+  const sep = ws && /\\/.test(ws.workspace) ? '\\' : '/';
+  const where = ws ? `${p.create ? 'New folder: ' : ''}${esc(ws.workspace)}${sep}${esc(slug(p.name) || '…')}` : 'Pick a host';
   const opts = projectOptions();
   proj.row = Math.min(proj.row, opts.length - 1);
-  const value = (o) => (o.key === 'resume' ? (p.resume ? 'continue last' : 'new chat') : p[o.key]);
+  const value = (o) => (o.key === 'resume' ? (p.resume ? 'continue last' : 'new chat') : o.key === 'send' ? (p.send ? 'send it' : "don't") : p[o.key]);
   const run = p.create || !p.host ? [] : running(p.host, p.name);
-  const html = `${head(`${esc(p.name)}${p.host ? ` <span class="on-host">· ${esc(p.host)}</span>` : ''}`)}<div class="where">${where}</div>
-    ${opts.map((o, i) => `<div class="opt2 ${i === proj.row ? 'kb' : ''}" data-row="${i}"><span class="lbl">${o.label}</span>${chips(o.values, value(o), i)}</div>`).join('')}
+  const optHtml = opts.map((o, i) => {
+    const body = o.key === 'name'
+      ? `<input id="pn" value="${esc(p.name)}" spellcheck="false" autocomplete="off">`
+      : chips(o.values, value(o), i);
+    return `<div class="opt2 ${i === proj.row ? 'kb' : ''}" data-row="${i}"><span class="lbl">${o.label}</span>${body}</div>`;
+  }).join('');
+  const html = `${head(`${esc(slug(p.name) || p.name)}${p.host ? ` <span class="on-host">· ${esc(p.host)}</span>` : ''}`)}<div class="where">${where}</div>
+    ${optHtml}
+    ${p.prompt && p.send ? `<div class="first">First message: “${esc(p.prompt.length > 160 ? `${p.prompt.slice(0, 160)}…` : p.prompt)}”</div>` : ''}
     ${run.length ? `<div class="already">Already running here: ${run.map((x) => `<button class="go2" data-jump="${esc(x.key)}">${esc(x.kind)} · ${esc(String(x.title || `window ${x.windowIndex}`).slice(0, 28))}</button>`).join(' ')}</div>` : ''}
     <div class="acts"><button class="start" data-start>Start ${esc(p.agent)}</button>${window.oo.code && !p.create ? '<button class="go2" data-code>VS Code</button>' : ''}</div>
     ${proj.busy ? `<div class="empty">${esc(proj.busy)}</div>` : ''}`;
-  return { html, hint: `<kbd>←</kbd><kbd>→</kbd> change · <kbd>Enter</kbd> start${window.oo.code ? ' · <kbd>o</kbd> code' : ''}${run.length ? ' · <kbd>g</kbd> go' : ''} · <kbd>Esc</kbd> back` };
+  return { html, hint: `<kbd>↑</kbd><kbd>↓</kbd> option · <kbd>←</kbd><kbd>→</kbd> change · <kbd>Enter</kbd> start${run.length ? ' · <kbd>g</kbd> go' : ''} · <kbd>Esc</kbd> back` };
+}
+
+// after a render, the name box has focus exactly when its row is selected
+function focusProjectRow() {
+  if (!proj || !proj.pick) return;
+  const o = projectOptions()[proj.row];
+  const pn = $('#pn');
+  if (o && o.key === 'name' && pn) { if (document.activeElement !== pn) { pn.focus(); pn.select(); } }
+  else if (document.activeElement && document.activeElement.id === 'pn') document.activeElement.blur();
 }
 
 function choose(i) {
   const r = projRows()[i];
   if (!r) return;
-  proj.pick = { name: r.name, host: r.host, create: !!r.create, agent: localStorage.getItem('oo.agent') || 'claude', resume: !r.create };
-  proj.row = r.create && !r.host ? 0 : projectOptions().findIndex((o) => o.key === 'agent');
+  if (r.type === 'agent') { jump(r.p.key); return; }
+  const { text } = projQuery();
+  // what you typed is worth sending when it says more than the folder's name
+  const prompt = text && slug(text) !== r.name.toLowerCase() ? text : '';
+  proj.pick = {
+    name: r.name, host: r.host, create: r.type === 'new', agent: localStorage.getItem('oo.agent') || 'claude',
+    resume: r.type !== 'new', send: !!prompt, prompt,
+  };
+  const opts = projectOptions();
+  proj.row = r.type === 'new' && !r.host ? opts.findIndex((o) => o.key === 'host') : opts.findIndex((o) => o.key === 'agent');
   sig = '';
-  render();
   if (document.activeElement) document.activeElement.blur();
+  render();
+  focusProjectRow();
 }
 
 function changeOption(d) {
   const o = projectOptions()[proj.row];
   const p = proj.pick;
+  if (!o || o.key === 'name') return;
   if (o.key === 'resume') p.resume = !p.resume;
+  else if (o.key === 'send') p.send = !p.send;
   else {
     const i = o.values.indexOf(p[o.key]);
     p[o.key] = o.values[((i < 0 ? (d > 0 ? -1 : 0) : i) + d + o.values.length) % o.values.length];
     if (o.key === 'agent') { try { localStorage.setItem('oo.agent', p.agent); } catch {} }
   }
+  proj.busy = '';
   render();
+}
+
+function moveRow(d) {
+  const n = projectOptions().length;
+  proj.row = (proj.row + d + n) % n;
+  render();
+  focusProjectRow();
 }
 
 async function launch() {
   const p = proj.pick;
-  if (!p.host) { proj.row = 0; proj.busy = 'Pick a host first (← →)'; render(); return; }
+  const opts = projectOptions();
+  if (p.create && !slug(p.name)) { proj.row = opts.findIndex((o) => o.key === 'name'); proj.busy = 'Give it a name'; render(); focusProjectRow(); return; }
+  if (!p.host) { proj.row = opts.findIndex((o) => o.key === 'host'); proj.busy = 'Pick a host first (← →)'; render(); focusProjectRow(); return; }
   proj.busy = `Starting ${p.agent} on ${p.host}…`;
   render();
   try {
-    await window.oo.startProject({ host: p.host, folder: p.name, create: p.create, agent: p.agent, resume: p.resume });
+    await window.oo.startProject({
+      host: p.host, folder: p.create ? slug(p.name) : p.name, create: p.create, agent: p.agent, resume: p.resume,
+      prompt: p.send ? p.prompt : '',
+    });
     projCache = null;
     proj = null;
     view = 'agents';
@@ -315,20 +409,23 @@ function projectKey(e) {
     const n = projRows().length;
     const down = e.key === 'ArrowDown' || (e.ctrlKey && (e.key === 'j' || e.key === 'n'));
     const up = e.key === 'ArrowUp' || (e.ctrlKey && (e.key === 'k' || e.key === 'p'));
-    if (down || up) { e.preventDefault(); if (n) { proj.sel = (proj.sel + (down ? 1 : -1) + n) % n; render(); } }
-    else if (e.key === 'Enter') { e.preventDefault(); choose(proj.sel); }
+    if (down || up) {
+      e.preventDefault();
+      if (n) { proj.sel = (proj.sel + (down ? 1 : -1) + n) % n; render(); const row = body.querySelector('.row.kb'); if (row) row.scrollIntoView({ block: 'nearest' }); }
+    } else if (e.key === 'Enter') { e.preventDefault(); choose(proj.sel); }
     else if (e.key === 'Escape') { e.preventDefault(); if (proj.q) { proj.q = ''; proj.sel = 0; render(); } else closeProjects(); }
     else if (e.key === 'Tab') e.preventDefault();
     return;
   }
-  const opts = projectOptions().length;
+  const naming = e.target.id === 'pn'; // letters belong to the name box
   const run = proj.pick.create ? [] : running(proj.pick.host, proj.pick.name);
-  if (e.key === 'Escape') { e.preventDefault(); proj.pick = null; proj.busy = ''; sig = ''; render(); const q = $('#pq'); if (q) q.focus(); }
-  else if (e.key === 'ArrowDown' || e.key === 'j') { e.preventDefault(); proj.row = (proj.row + 1) % opts; render(); }
-  else if (e.key === 'ArrowUp' || e.key === 'k') { e.preventDefault(); proj.row = (proj.row - 1 + opts) % opts; render(); }
-  else if (e.key === 'ArrowRight' || e.key === 'l' || e.key === 'Tab') { e.preventDefault(); changeOption(1); }
+  if (e.key === 'Escape') { e.preventDefault(); proj.pick = null; proj.busy = ''; sig = ''; if (document.activeElement) document.activeElement.blur(); render(); const q = $('#pq'); if (q) q.focus(); }
+  else if (e.key === 'ArrowDown' || (!naming && e.key === 'j') || e.key === 'Tab') { e.preventDefault(); moveRow(e.shiftKey ? -1 : 1); }
+  else if (e.key === 'ArrowUp' || (!naming && e.key === 'k')) { e.preventDefault(); moveRow(-1); }
+  else if (naming) { if (e.key === 'Enter') { e.preventDefault(); launch(); } }
+  else if (e.key === 'ArrowRight' || e.key === 'l') { e.preventDefault(); changeOption(1); }
   else if (e.key === 'ArrowLeft' || e.key === 'h') { e.preventDefault(); changeOption(-1); }
-  else if (e.key === 'Enter') { e.preventDefault(); if (!proj.busy || !/^Starting/.test(proj.busy)) launch(); }
+  else if (e.key === 'Enter') { e.preventDefault(); if (!/^Starting/.test(proj.busy || '')) launch(); }
   else if (e.key === 'g' && run.length) jump(run[0].key);
   else if (e.key === 'o' && window.oo.code) {
     if (!proj.pick.host) { proj.busy = 'Pick a host first (← →)'; render(); return; }
@@ -348,7 +445,7 @@ function render() {
   if (next !== sig) {
     // keep the reply or search box focused, caret and all, across the rebuild
     const a = document.activeElement;
-    const focused = a && (a.id === 'reply' || a.id === 'q' || a.id === 'pq') ? a.id : null;
+    const focused = a && ['reply', 'q', 'pq', 'pn'].includes(a.id) ? a.id : null;
     const caret = focused ? a.selectionStart : 0;
     const top = body.scrollTop;
     body.innerHTML = html;
@@ -519,7 +616,11 @@ body.addEventListener('click', (e) => {
   if (t.dataset.start !== undefined) { launch(); return; }
   if (t.dataset.code !== undefined) { window.oo.code({ host: proj.pick.host, folder: proj.pick.name }).catch((err) => toast(err.message)); return; }
   if (t.dataset.proj !== undefined) { proj.sel = Number(t.dataset.proj); choose(proj.sel); return; }
-  if (t.dataset.row !== undefined) { proj.row = Number(t.dataset.row); changeOption(1); return; }
+  if (t.dataset.row !== undefined) {
+    proj.row = Number(t.dataset.row);
+    if ((projectOptions()[proj.row] || {}).key === 'name') { render(); focusProjectRow(); } else changeOption(1);
+    return;
+  }
   if (t.dataset.close !== undefined) collapse();
   else if (t.dataset.jump) jump(t.dataset.jump);
   else if (t.dataset.n) answer(cur, Number(t.dataset.n));
@@ -530,6 +631,7 @@ body.addEventListener('input', (e) => {
   if (e.target.id === 'reply' && cur) drafts[cur] = e.target.value;
   if (e.target.id === 'q') { query = e.target.value; kb = 0; render(); body.scrollTop = 0; }
   if (e.target.id === 'pq' && proj) { proj.q = e.target.value; proj.sel = 0; render(); }
+  if (e.target.id === 'pn' && proj && proj.pick) { proj.pick.name = e.target.value; proj.busy = ''; render(); }
 });
 
 function openSearch() {

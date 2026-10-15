@@ -22,6 +22,8 @@ const FIELDS = ['pane_id', 'session_name', 'window_index', 'window_name', 'pane_
 const REQUIRED = 14; // rows from before pane_width/pane_height still parse
 const FMT = FIELDS.map((f) => `#{${f}}`).join(SEP);
 const SESSION_NAME = /^[A-Za-z0-9_.-]{1,40}$/;
+const NOTE_FILES = ['README.md', 'readme.md', 'AGENTS.md', 'CLAUDE.md', 'package.json', 'pyproject.toml'];
+const NOTE_BYTES = 1200;
 
 function parseRow(line) {
   const v = line.replace(/\r$/, '').split(SEP);
@@ -318,6 +320,24 @@ class LocalSource extends TmuxSource {
 
   async home() { return require('os').homedir(); }
 
+  // the start of each project's README (or AGENTS.md, CLAUDE.md, package.json): what it's about
+  async projectNotes(dir) {
+    const fs = require('fs');
+    const path = require('path');
+    const root = await this.resolve(dir);
+    const out = [];
+    for (const d of await fs.promises.readdir(root, { withFileTypes: true })) {
+      if (!d.isDirectory() || d.name.startsWith('.')) continue;
+      let text = '';
+      for (const f of NOTE_FILES) {
+        text = await fs.promises.readFile(path.join(root, d.name, f), 'utf8').then((s) => s.slice(0, NOTE_BYTES)).catch(() => '');
+        if (text) break;
+      }
+      out.push(`@@${d.name}\n${text}`);
+    }
+    return out.join('\n');
+  }
+
   // [{ name, mtime }] for the folders in dir, newest first
   async listDirs(dir) {
     const fs = require('fs');
@@ -474,6 +494,12 @@ class SshTmuxSource extends ShellSource {
 
   async claudeLogs(id) { return this.exec([this.claudeCmd(`logs ${id}`)]); }
 
+  async projectNotes(dir) {
+    const root = await this.resolve(dir);
+    const files = NOTE_FILES.map((f) => `"$d/${f}"`).join(' ');
+    return this.exec([`cd ${sq(root)} 2>/dev/null && for d in */; do d=\${d%/}; case "$d" in .*) continue;; esac; echo "@@$d"; for f in ${files}; do [ -f "$f" ] && { head -c ${NOTE_BYTES} "$f"; echo; break; }; done; done`]);
+  }
+
   async listDirs(dir) {
     const root = await this.resolve(dir);
     const out = await this.exec([`find ${sq(root)} -mindepth 1 -maxdepth 1 -type d -not -name '.*' -printf '@@%T@ %f\\n' 2>/dev/null`]);
@@ -527,6 +553,16 @@ class SshPsmuxSource extends ShellSource {
       return /[\s<>|&^%#{}()]/.test(a) ? `"${a}"` : a;
     };
     return `"${bin}" ${argv.map(arg).join(' ')} 2>&1`;
+  }
+
+  async projectNotes(dir) {
+    const root = await this.resolve(dir);
+    if (/["'\r\n%]/.test(root)) throw new Error('bad workspace path');
+    const ps = `Get-ChildItem -LiteralPath '${root}' -Directory | Where-Object { $_.Name -notlike '.*' } | ForEach-Object { '@@' + $_.Name; ` +
+      `foreach ($f in @(${NOTE_FILES.map((f) => `'${f}'`).join(',')})) { $p = Join-Path $_.FullName $f; ` +
+      `if (Test-Path -LiteralPath $p) { $t = [IO.File]::ReadAllText($p); $t.Substring(0, [Math]::Min(${NOTE_BYTES}, $t.Length)); break } } }`;
+    const enc = Buffer.from(ps, 'utf16le').toString('base64');
+    return this.clean(await this.raw([`${POWERSHELL} -NoLogo -NoProfile -NonInteractive -EncodedCommand ${enc} < NUL`], 30000));
   }
 
   async listDirs(dir) {
