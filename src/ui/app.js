@@ -138,7 +138,7 @@ function agentsCard() {
     const line = status(p) === 'input' ? (p.question || 'Waiting for your answer') : (p.title || p.summary || subline(p));
     return `<div class="row ${p.kind ? '' : 'shell'} ${i++ === kb ? 'kb' : ''}" data-jump="${esc(p.key)}">
       <span class="st ${status(p)}"></span>
-      <div class="mid"><div class="t1"><span class="nm">${esc(p.label)}</span><span class="kind">${esc(p.kind || 'shell')}${showHost ? ` · ${esc(p.host)}` : ''}</span></div>
+      <div class="mid"><div class="t1"><span class="nm">${esc(p.label)}</span><span class="kind">${esc(p.kind || 'shell')}${p.bg ? ' · background' : ''}${showHost ? ` · ${esc(p.host)}` : ''}</span></div>
       <div class="t2">${esc(line)}</div></div>
       <span class="age">${esc(when(p))}</span></div>`;
   };

@@ -194,7 +194,14 @@ async function api(req, res, parts) {
         await h.src.keys(p, keys);
       } else if (c === 'text') { await h.src.text(p, String(body.text || '')); }
       else if (c === 'seen') monitor.markSeen(p.key);
-      else if (c === 'focus') await h.src.focus(p);
+      else if (c === 'focus') await h.src.focus(p.bg ? await h.src.attachBackground(p.bg) : p);
+      else if (c === 'attach') {
+        // background session -> a tmux window running `claude attach`; returns that pane's key
+        if (!p.bg) return send(res, 200, { key: p.key });
+        const np = await h.src.attachBackground(p.bg);
+        await refresh(h);
+        return send(res, 200, { key: `${h.cfg.name}|${np.session}|${np.paneId}` });
+      }
       else return send(res, 404, { error: 'unknown action' });
       pushState();
       return send(res, 200, { ok: true });

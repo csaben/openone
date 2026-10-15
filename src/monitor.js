@@ -33,6 +33,8 @@ class Monitor {
       const key = `${host}|${raw.session}|${raw.paneId}`;
       seen.add(key);
       const d = detect(raw.text || '', { command: raw.command, windowName: raw.windowName });
+      // the source knows better (Claude's own status for background sessions)
+      if (raw.override) Object.assign(d, raw.override);
       let p = this.panes.get(key);
       const fresh = !p;
       if (fresh) {
@@ -43,7 +45,7 @@ class Monitor {
         session: raw.session, windowIndex: raw.windowIndex, windowName: raw.windowName,
         paneId: raw.paneId, path: raw.path, command: raw.command,
         active: raw.windowActive === '1' && raw.paneActive === '1' && raw.attached !== false,
-        label: label(raw), title: title(raw, this.hostNames) || p.title || '',
+        label: label(raw), title: title(raw, this.hostNames) || p.title || '', bg: raw.bg || null,
       });
       if (d.kind) p.kind = d.kind;
 
@@ -90,7 +92,7 @@ class Monitor {
       key: p.key, host: p.host, session: p.session, windowIndex: p.windowIndex, paneId: p.paneId,
       kind: p.kind || null, state: p.state, label: p.label, title: p.title, active: p.active,
       since: p.since, unseen: p.unseen, question: p.question, topic: p.topic, detail: p.detail, options: p.options,
-      summary: p.summary, doneAt: p.doneAt, path: p.path,
+      summary: p.summary, doneAt: p.doneAt, path: p.path, bg: p.bg,
     }));
   }
 }

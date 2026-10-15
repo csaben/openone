@@ -271,7 +271,15 @@
     menu: openMenu,
     mute: () => { muted = !muted; store.set('muted', muted); emitState(); },
     ready: () => { connect(); fire('expand'); },
-    jump: (key) => viewer(key),
+    jump: async (key) => {
+      // a background session gets opened in a tmux window first, then viewed like any pane
+      const p = last.panes.find((x) => x.key === key);
+      if (p && p.bg) {
+        toast('Opening background session…');
+        try { key = (await call('POST', `api/panes/${enc(key)}/attach`)).key; } catch (e) { toast(e.message); return; }
+      }
+      viewer(key);
+    },
     answer: (key, n) => call('POST', `api/panes/${enc(key)}/answer`, { n }).catch((e) => toast(e.message)),
     reply: (key, text) => call('POST', `api/panes/${enc(key)}/reply`, { text }).catch((e) => toast(e.message)),
     seen: (key) => call('POST', `api/panes/${enc(key)}/seen`).catch(() => {}),

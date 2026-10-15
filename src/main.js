@@ -226,7 +226,8 @@ async function jump(key) {
   monitor.markSeen(key);
   push();
   win.webContents.send('collapse');
-  await r.h.src.focus(r.p).catch(() => {});
+  const pane = r.p.bg ? await r.h.src.attachBackground(r.p.bg).catch(() => null) : r.p;
+  if (pane) await r.h.src.focus(pane).catch(() => {});
   const res = await wt.focus(r.h.cfg.wtTab, r.h.cfg.wtTabIndex);
   if (!res.ok) win.webContents.send('toast', `Couldn't find the ${r.h.cfg.name} tab in Windows Terminal`);
 }

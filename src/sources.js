@@ -13,6 +13,7 @@
 
 const { execFile, spawn } = require('child_process');
 const { SessionStream, parseClients } = require('./stream');
+const { Background, ID: BG_ID } = require('./bg');
 
 const SEP = '<|>';
 const FIELDS = ['pane_id', 'session_name', 'window_index', 'window_name', 'pane_index', 'pane_current_command',
@@ -159,6 +160,11 @@ class TmuxSource {
     });
     const keep = new Set(all.map((p) => `${p.session}|${p.paneId}`));
     for (const key of this.cache.keys()) if (!keep.has(key)) this.cache.delete(key);
+    // Claude background sessions run outside tmux; list them too (config "background": false turns it off)
+    if (this.cfg.background !== false) {
+      if (!this.bg) this.bg = new Background(this);
+      all.push(...await this.bg.rows(all).catch(() => []));
+    }
     return all;
   }
 
@@ -255,6 +261,17 @@ class TmuxSource {
     return false;
   }
 
+  // Opens a Claude background session in a tmux window (so it can be seen and answered
+  // like any pane), or returns the window that already shows it.
+  async attachBackground(id) {
+    if (!BG_ID.test(id || '')) throw new Error('bad background session id');
+    const [list] = await this.batch([['list-panes', '-a', '-F', FMT]]);
+    const open = list.split('\n').map(parseRow).filter(Boolean).find((p) => p.windowName === `bg-${id}`);
+    if (open) return open;
+    if (this.bg) this.bg.at = 0; // relist soon, so the row turns into the window
+    return this.newWindow({ name: `bg-${id}`, line: `claude attach ${id}` });
+  }
+
   // the shell new windows start in, which decides how project commands are written
   get shell() { return this.cfg.shell || (this.psmux ? 'powershell' : 'bash'); }
 
@@ -281,6 +298,17 @@ class LocalSource extends TmuxSource {
   get psmux() { return /psmux/i.test(this.bin); }
 
   controlSpawn(session) { return spawn(this.bin, ['-C', 'attach', '-t', session], { windowsHide: true }); }
+
+  claude(args) {
+    return new Promise((resolve, reject) => {
+      execFile(this.cfg.claude || 'claude', args, { windowsHide: true, maxBuffer: 16 << 20, timeout: 15000, encoding: 'utf8' },
+        (err, out) => (err && !out ? reject(err) : resolve(out)));
+    });
+  }
+
+  claudeAgents() { return this.claude(['agents', '--json']); }
+
+  claudeLogs(id) { return this.claude(['logs', id]); }
 
   async home() { return require('os').homedir(); }
 
@@ -433,6 +461,13 @@ class SshTmuxSource extends ShellSource {
 
   controlSpawn(session) { return spawn(this.ssh, this.sshArgs(`tmux -C attach -t ${sq(session)}`), { windowsHide: true }); }
 
+  // bash --norc doesn't have ~/.local/bin, where claude installs itself
+  claudeCmd(args) { return `PATH="$HOME/.local/bin:$PATH" ${this.cfg.claude || 'claude'} ${args} </dev/null 2>/dev/null; echo`; }
+
+  async claudeAgents() { return this.exec([this.claudeCmd('agents --json')]); }
+
+  async claudeLogs(id) { return this.exec([this.claudeCmd(`logs ${id}`)]); }
+
   async listDirs(dir) {
     const root = await this.resolve(dir);
     const out = await this.exec([`find ${sq(root)} -mindepth 1 -maxdepth 1 -type d -not -name '.*' -printf '@@%T@ %f\\n' 2>/dev/null`]);
@@ -455,6 +490,10 @@ class SshPsmuxSource extends ShellSource {
   get psmux() { return true; }
 
   get remoteShell() { return 'cmd /q'; }
+
+  async claudeAgents() { return this.clean(await this.exec([`${this.cfg.claude || 'claude'} agents --json 2>nul < NUL`])); }
+
+  async claudeLogs(id) { return this.clean(await this.exec([`${this.cfg.claude || 'claude'} logs ${id} 2>nul < NUL`])); }
 
   controlSpawn(session) {
     return spawn(this.ssh, this.sshArgs(`"${this.cfg.psmux || 'psmux'}" -C attach -t ${session}`), { windowsHide: true });

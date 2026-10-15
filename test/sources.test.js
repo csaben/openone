@@ -4,7 +4,7 @@ const { LocalSource, FMT } = require('../src/sources');
 
 // A fake psmux: one pane whose cursor moves on every poll, like a working agent.
 function fake(type) {
-  const src = new LocalSource({ type, stream: false });
+  const src = new LocalSource({ type, stream: false, background: false });
   let tick = 0;
   src.captures = 0;
   src.batch = async (argvs) => argvs.map((a) => {
@@ -40,7 +40,7 @@ test('format string has no spaces (it crosses cmd.exe for remote psmux)', () => 
 });
 
 test('psmux: the slow refresh re-reads one overdue pane per poll, not all at once', async () => {
-  const src = new LocalSource({ type: 'psmux', refreshMs: 20000, stream: false });
+  const src = new LocalSource({ type: 'psmux', refreshMs: 20000, stream: false, background: false });
   src.captures = 0;
   const row = (id) => [id, 's', '1', 'claude', '1', 'node', '/x', 't', '1', '1', '1', '100', '0', '5'].join('<|>');
   src.batch = async (argvs) => argvs.map((a) => {
