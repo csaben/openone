@@ -21,13 +21,49 @@ const { execFileSync } = require('child_process');
 const URL_ = (process.env.OPENONE_URL || 'http://127.0.0.1:8950').replace(/\/$/, '');
 const HOST = (process.env.OPENONE_HOST || os.hostname()).toLowerCase();
 
+const sh = (cmd, args) => execFileSync(cmd, args, { encoding: 'utf8', timeout: 8000, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
+
 function whereAmI() {
-  const pane = process.env.TMUX_PANE || '';
+  let pane = process.env.TMUX_PANE || '';
   let session = process.env.PSMUX_SESSION || '';
   if (pane && !session && process.env.TMUX) {
-    try { session = execFileSync('tmux', ['display-message', '-p', '-t', pane, '#{session_name}'], { encoding: 'utf8', timeout: 3000 }).trim(); } catch {}
+    try { session = sh('tmux', ['display-message', '-p', '-t', pane, '#{session_name}']).trim(); } catch {}
   }
+  if (!pane) ({ pane, session } = fromAncestors());
   return { host: HOST, pane, session };
+}
+
+// Without $TMUX_PANE (Codex hands MCP servers a trimmed environment): walk up the
+// parent processes to the one that is a pane's shell.
+function fromAncestors() {
+  const none = { pane: '', session: '' };
+  try {
+    const bin = process.platform === 'win32' ? 'psmux' : 'tmux';
+    const panes = new Map();
+    for (const l of sh(bin, ['list-panes', '-a', '-F', '#{pane_pid} #{pane_id} #{session_name}']).split(/\r?\n/)) {
+      const m = l.trim().match(/^(\d+) (%\d+) (.+)$/);
+      if (m) panes.set(Number(m[1]), { pane: m[2], session: m[3] });
+    }
+    const parent = new Map();
+    if (process.platform === 'linux') {
+      const up = (pid) => Number(fs.readFileSync(`/proc/${pid}/stat`, 'utf8').replace(/^.*\) /, '').split(' ')[1]);
+      for (let pid = process.pid, i = 0; pid > 1 && i < 30; i++) {
+        if (panes.has(pid)) return panes.get(pid);
+        try { pid = up(pid); } catch { return none; }
+      }
+      return none;
+    }
+    if (process.platform === 'win32') {
+      const out = sh('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+        'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId) $($_.ParentProcessId)" }']);
+      for (const l of out.split(/\r?\n/)) { const [a, b] = l.trim().split(' ').map(Number); if (a) parent.set(a, b); }
+      for (let pid = process.pid, i = 0; pid && i < 30; i++) {
+        if (panes.has(pid)) return panes.get(pid);
+        pid = parent.get(pid);
+      }
+    }
+  } catch {}
+  return none;
 }
 const ME = whereAmI();
 
