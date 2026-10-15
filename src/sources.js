@@ -12,21 +12,23 @@
 // resolves into psmux session 0.
 
 const { execFile, spawn } = require('child_process');
+const { SessionStream, parseClients } = require('./stream');
 
 const SEP = '<|>';
 const FIELDS = ['pane_id', 'session_name', 'window_index', 'window_name', 'pane_index', 'pane_current_command',
   'pane_current_path', 'pane_title', 'window_active', 'pane_active', 'session_attached',
-  'history_size', 'cursor_x', 'cursor_y'];
+  'history_size', 'cursor_x', 'cursor_y', 'pane_width', 'pane_height', 'alternate_on'];
+const REQUIRED = 14; // rows from before pane_width/pane_height still parse
 const FMT = FIELDS.map((f) => `#{${f}}`).join(SEP);
 const SESSION_NAME = /^[A-Za-z0-9_.-]{1,40}$/;
 
 function parseRow(line) {
   const v = line.replace(/\r$/, '').split(SEP);
-  if (v.length < FIELDS.length || !v[0].startsWith('%')) return null;
+  if (v.length < REQUIRED || !v[0].startsWith('%')) return null;
   return {
     paneId: v[0], session: v[1], windowIndex: v[2], windowName: v[3], paneIndex: v[4],
     command: v[5], path: v[6], title: v[7], windowActive: v[8], paneActive: v[9], attached: v[10] !== '0',
-    sig: `${v[11]}/${v[12]}/${v[13]}`, text: '',
+    sig: `${v[11]}/${v[12]}/${v[13]}`, width: v[14], height: v[15], alt: v[16] === '1', cursor: [Number(v[12]), Number(v[13])], text: '',
   };
 }
 
@@ -42,13 +44,92 @@ class TmuxSource {
   constructor(cfg) {
     this.cfg = cfg;
     this.cache = new Map();
+    this.streams = new Map(); // session -> SessionStream
+    this.clients = null;
   }
 
   target(p) { return `${p.session}:${p.windowIndex}.${p.paneId}`; }
 
+  // Stream pane output over control mode instead of polling capture-pane: on by default
+  // for psmux, where every capture can flash the attached terminal.
+  get streaming() { return !!(this.controlSpawn && (this.cfg.stream ?? this.psmux)); }
+
+  // keep one control client per session that has panes, restarting dead ones after 5s
+  syncStreams(panes) {
+    const now = Date.now();
+    const bySession = new Map();
+    for (const p of panes) {
+      if (!bySession.has(p.session)) bySession.set(p.session, []);
+      bySession.get(p.session).push(p);
+    }
+    for (const [name, st] of this.streams) if (!bySession.has(name)) { st.close(); this.streams.delete(name); }
+    for (const [name, rows] of bySession) {
+      if (!SESSION_NAME.test(name)) continue;
+      let st = this.streams.get(name);
+      if (!st) { st = new SessionStream(name, (sess) => this.controlSpawn(sess)); this.streams.set(name, st); }
+      if (!st.alive && now - (st.endedAt || 0) > 5000) { try { st.start(); } catch { st.endedAt = now; } }
+      st.sync(rows);
+    }
+  }
+
+  // Clients other than control-mode ones (ours included), refreshed every few seconds.
+  // session_attached counts control clients, so streamed sessions would all look attached.
+  async realClients(maxAgeMs = 5000) {
+    if (!this.clients || Date.now() - this.clients.at > maxAgeMs) {
+      const [out] = await this.batch([['list-clients', '-F', '#{client_name} #{session_name} #{client_control_mode} #{client_activity}']]);
+      this.clients = { at: Date.now(), list: parseClients(out).filter((c) => !c.control) };
+    }
+    return this.clients.list;
+  }
+
+  // a pane's screen for viewers: from the stream when it has one, else capture-pane
+  async screen(p, lines = 200, color = false) {
+    const st = this.streams.get(p.session);
+    if (st && st.ready(p.paneId)) return color ? st.ansi(p.paneId, lines) : st.text(p.paneId, lines);
+    const [text] = await this.batch([['capture-pane', '-p', ...(color ? ['-e'] : []), '-J', '-S', `-${lines}`, '-t', this.target(p)]]);
+    return text.replace(/\r/g, '');
+  }
+
   async snapshot() {
     const [list] = await this.batch([['list-panes', '-a', '-F', FMT]]);
-    const panes = list.split('\n').map(parseRow).filter(Boolean);
+    const all = list.split('\n').map(parseRow).filter(Boolean);
+    const n = this.cfg.lines || 60;
+    const streamed = new Set();
+    if (this.streaming) {
+      this.syncStreams(all);
+      const real = new Set((await this.realClients().catch(() => [])).map((c) => c.session));
+      const seed = [];
+      for (const p of all) {
+        p.attached = real.has(p.session);
+        const st = this.streams.get(p.session);
+        if (!st || !st.alive) continue;
+        if (st.ready(p.paneId)) { p.text = st.text(p.paneId, n); streamed.add(p); continue; }
+        // A pane that hasn't printed since the client attached has an unknown screen, so it's
+        // read once with capture-pane. One pane per poll: a burst of captures flashes.
+        if (seed.length < (this.cfg.seedPerPoll ?? 1)) seed.push(p);
+        else { p.text = (this.cache.get(`${p.session}|${p.paneId}`) || {}).text || ''; streamed.add(p); }
+      }
+      if (seed.length) {
+        for (const p of seed) this.streams.get(p.session).beginSeed(p.paneId);
+        let texts = null;
+        try {
+          texts = await this.batch(seed.map((p) => ['capture-pane', '-p', '-e', '-S', `-${n}`, '-t', this.target(p)]));
+        } finally {
+          seed.forEach((p, i) => {
+            const st = this.streams.get(p.session);
+            if (!texts) { st.abortSeed(p.paneId); return; }
+            const hist = Number(p.sig.split('/')[0]);
+            st.seed(p.paneId, texts[i] || '', {
+              cursor: p.cursor, alt: p.alt, rows: Number(p.height) || 0, history: Number.isFinite(hist) ? Math.min(hist, n) : null,
+            });
+            p.text = st.text(p.paneId, n);
+            streamed.add(p);
+          });
+        }
+      }
+      for (const p of streamed) this.cache.set(`${p.session}|${p.paneId}`, { sig: p.sig, text: p.text, at: Date.now() });
+    }
+    const panes = all.filter((p) => !streamed.has(p));
     // Capturing is the expensive part, and on psmux each capture can flash another window
     // in the attached client. So only re-read a pane when its scrollback/cursor moved (at
     // most every captureEveryMs per pane), plus a slow refresh for in-place redraws that
@@ -71,25 +152,22 @@ class TmuxSource {
       }
     }
     overdue.sort((a, b) => b[0] - a[0]).slice(0, perPoll).forEach(([, p]) => stale.push(p));
-    const n = this.cfg.lines || 60;
     const texts = stale.length ? await this.batch(stale.map((p) => ['capture-pane', '-p', '-J', '-S', `-${n}`, '-t', this.target(p)])) : [];
     stale.forEach((p, i) => {
       p.text = (texts[i] || '').replace(/\r/g, '');
       this.cache.set(`${p.session}|${p.paneId}`, { sig: p.sig, text: p.text, at: now });
     });
-    const keep = new Set(panes.map((p) => `${p.session}|${p.paneId}`));
+    const keep = new Set(all.map((p) => `${p.session}|${p.paneId}`));
     for (const key of this.cache.keys()) if (!keep.has(key)) this.cache.delete(key);
-    return panes;
+    return all;
   }
 
   async focus(p) {
     const cmds = [];
-    if (!p.attached) {
-      // move the most recently used client onto this pane's session
-      const [clients] = await this.batch([['list-clients', '-F', '#{client_activity} #{client_name}']]);
-      const best = clients.split('\n').map((l) => l.trim().split(' ')).filter((x) => x.length === 2 && /^\d+$/.test(x[0]))
-        .sort((a, b) => Number(b[0]) - Number(a[0]))[0];
-      cmds.push(best ? ['switch-client', '-c', best[1], '-t', p.session] : ['switch-client', '-t', p.session]);
+    const clients = (await this.realClients(0).catch(() => [])).sort((a, b) => a.recent - b.recent);
+    if (!clients.some((c) => c.session === p.session)) {
+      // move the most recently used terminal (never a control client) onto this pane's session
+      cmds.push(clients[0] ? ['switch-client', '-c', clients[0].name, '-t', p.session] : ['switch-client', '-t', p.session]);
     }
     cmds.push(['select-window', '-t', `${p.session}:${p.windowIndex}`], ['select-pane', '-t', this.target(p)]);
     await this.batch(cmds);
@@ -144,7 +222,9 @@ class TmuxSource {
   async newWindow({ name, line }) {
     if (!SESSION_NAME.test(name || '')) throw new Error('window name: letters, digits, _ . - only');
     const [list] = await this.batch([['list-sessions', '-F', '#{session_attached} #{session_activity} #{session_name}']]);
+    const shown = new Set((await this.realClients(0).catch(() => [])).map((c) => c.session));
     const sessions = list.split('\n').map((l) => l.trim().match(/^(\d+) (\d+) (\S+)$/)).filter(Boolean)
+      .map((m) => [m[0], shown.size ? (shown.has(m[3]) ? '1' : '0') : m[1], m[2], m[3]])
       .sort((a, b) => (Number(b[1] !== '0') - Number(a[1] !== '0')) || Number(b[2]) - Number(a[2]));
     if (!sessions.length) return this.newSession({ name, cmd: line });
     const session = sessions[0][3];
@@ -167,7 +247,7 @@ class TmuxSource {
     const min = this.cfg.shellWarmMs ?? 400;
     await new Promise((r) => setTimeout(r, min));
     while (Date.now() < until) {
-      const [text] = await this.batch([['capture-pane', '-p', '-t', this.target(pane)]]);
+      const text = await this.screen(pane, 0);
       const last = text.replace(/\r/g, '').split('\n').map((l) => l.trimEnd()).filter(Boolean).pop() || '';
       if (/(^PS .*>|[$#>%❯])$/.test(last)) return true;
       await new Promise((r) => setTimeout(r, 300));
@@ -189,7 +269,7 @@ class TmuxSource {
     await this.batch([['kill-session', '-t', name]]);
   }
 
-  close() {}
+  close() { for (const st of this.streams.values()) st.close(); this.streams.clear(); }
 }
 
 class LocalSource extends TmuxSource {
@@ -199,6 +279,8 @@ class LocalSource extends TmuxSource {
   }
 
   get psmux() { return /psmux/i.test(this.bin); }
+
+  controlSpawn(session) { return spawn(this.bin, ['-C', 'attach', '-t', session], { windowsHide: true }); }
 
   async home() { return require('os').homedir(); }
 
@@ -331,7 +413,11 @@ class ShellSource extends TmuxSource {
     return this.homeDir;
   }
 
-  close() { if (this.proc) this.proc.kill(); }
+  close() { super.close(); if (this.proc) this.proc.kill(); }
+
+  sshArgs(command) {
+    return ['-T', '-o', 'BatchMode=yes', '-o', 'ServerAliveInterval=15', '-o', 'ConnectTimeout=6', this.cfg.ssh, command];
+  }
 }
 
 const sq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
@@ -344,6 +430,8 @@ class SshTmuxSource extends ShellSource {
   init() { return []; }
 
   render(argv) { return `tmux ${argv.map(sq).join(' ')} </dev/null 2>&1`; }
+
+  controlSpawn(session) { return spawn(this.ssh, this.sshArgs(`tmux -C attach -t ${sq(session)}`), { windowsHide: true }); }
 
   async listDirs(dir) {
     const root = await this.resolve(dir);
@@ -367,6 +455,10 @@ class SshPsmuxSource extends ShellSource {
   get psmux() { return true; }
 
   get remoteShell() { return 'cmd /q'; }
+
+  controlSpawn(session) {
+    return spawn(this.ssh, this.sshArgs(`"${this.cfg.psmux || 'psmux'}" -C attach -t ${session}`), { windowsHide: true });
+  }
 
   get homeCommand() { return 'echo %USERPROFILE%'; }
 

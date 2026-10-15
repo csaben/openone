@@ -32,7 +32,9 @@
         if (last && same(last, st)) last.t += t;
         else segs.push({ ...st, t });
       };
-      const re = /\x1b\[([0-9;:]*)m|\x1b\]8;[^;\x07\x1b]*;([^\x07\x1b]*)(?:\x07|\x1b\\)|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]/g;
+      // colors, links, then any other control sequence (cursor moves etc.), which is dropped
+      // except "cursor forward", which is spaces
+      const re = /\x1b\[([0-9;:]*)m|\x1b\]8;[^;\x07\x1b]*;([^\x07\x1b]*)(?:\x07|\x1b\\)|\x1b\[(\d*)C|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-9;:?<=>]*[ -\/]*[@-~]|\x1b[@-Z\\-_]/g;
       let at = 0;
       let m;
       while ((m = re.exec(line))) {
@@ -40,6 +42,7 @@
         at = re.lastIndex;
         if (m[1] !== undefined) st = sgr(st, m[1]);
         else if (m[2] !== undefined) st = { ...st, link: m[2] || undefined };
+        else if (m[3] !== undefined) push(' '.repeat(Number(m[3]) || 1));
       }
       push(line.slice(at));
       out.push(segs);

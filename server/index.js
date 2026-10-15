@@ -180,9 +180,9 @@ async function api(req, res, parts) {
     if (m === 'GET' && c === 'screen') {
       const q = new URL(req.url, 'http://x').searchParams;
       const lines = Math.min(Number(q.get('lines')) || 200, 2000);
-      const color = q.get('ansi') === '1' ? ['-e'] : []; // keep colors for the web viewer
-      const [text] = await h.src.batch([['capture-pane', '-p', ...color, '-J', '-S', `-${lines}`, '-t', h.src.target(p)]]);
-      return send(res, 200, { key: p.key, text: text.replace(/\r/g, '') });
+      // from the pane's stream when there is one (no capture-pane), with colors for the web viewer
+      const text = await h.src.screen(p, lines, q.get('ansi') === '1');
+      return send(res, 200, { key: p.key, text });
     }
     if (m === 'POST') {
       const body = await readJson(req);

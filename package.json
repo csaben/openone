@@ -44,5 +44,9 @@
       "shortcutName": "openone",
       "artifactName": "openone-setup-${version}.${ext}"
     }
+  },
+  "dependencies": {
+    "@xterm/addon-serialize": "0.13.0",
+    "@xterm/headless": "5.5.0"
   }
 }
