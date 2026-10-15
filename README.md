@@ -11,6 +11,10 @@ A small Windows edge dock that watches the coding agents (Claude Code, Codex) ru
 
 It's inspired by [One](https://getone.one/#what-it-is). I loved the side-screen UI and having every agent in one place. But I didn't want a new terminal or a new way of working: I already run psmux in one Windows Terminal tab and ssh + tmux to a Linux box in another. openone just watches those panes and gets out of the way.
 
+[![openone demo: every agent on every machine in one dock](assets/demo-poster.jpg)](docs/openone-demo.mp4)
+
+<p align="center"><sub>45 seconds: the dock over psmux and ssh + tmux, answering agents, agents messaging each other, and the phone view. <a href="docs/openone-demo.mp4">Watch the demo</a>.</sub></p>
+
 - **Edge tab**: one dot per active agent. Blue means working, amber means it needs your answer, green means finished.
 - **Inbox card**: shows the question or the command waiting for approval. Press `1`–`9` to answer, or type a reply.
 - **Toasts and a peek bubble** when an agent finishes or asks something. None for the pane you're already looking at.
@@ -103,3 +107,7 @@ A message typed into a pane reads like a prompt from you, so any agent can steer
 - On psmux, panes are streamed rather than polled: one control-mode client per session (`psmux -C attach`) feeds each pane's output into a headless terminal emulator, because every `capture-pane` can flash the attached terminal. Each pane is read once when openone first sees it. Set `"stream": false` on a host to go back to polling.
 - psmux pane ids repeat across sessions, so openone always targets `session:window.%id`.
 - `npx electron tools/render-icons.js` rebuilds the PNG icons from `assets/*.svg`.
+
+## License
+
+MIT. See [LICENSE](LICENSE).

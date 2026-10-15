@@ -16,6 +16,7 @@
   },
   "productName": "openone",
   "author": "csaben",
+  "license": "MIT",
   "build": {
     "appId": "com.csaben.openone",
     "productName": "openone",
