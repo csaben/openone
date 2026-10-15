@@ -1,6 +1,6 @@
 // Fuzzy search over panes for the panel's "/" filter. Every word of the query must match
 // somewhere. Names (label, session, kind, host) count most: a prefix beats a substring,
-// which beats letters in order ("erx" finds er-apex). Title, question and summary only
+// which beats letters in order ("ptd" finds photo-tidy). Title, question and summary only
 // count as plain substrings, so a word from the conversation still finds its agent.
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();

@@ -20,7 +20,7 @@ const LOG = 200;
 const slug = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'agent';
 
 // Unique names that stay put while the pane lives: "label@host", or "label.<pane>@host"
-// when a host has several agents with the same label ("er-apex.52@inari" is pane %52),
+// when a host has several agents with the same label ("photo-tidy.52@desk" is pane %52),
 // plus the session if pane numbers repeat (psmux numbers panes per session).
 // -> Map key -> name
 function names(panes) {
@@ -86,7 +86,7 @@ class Bus {
     return cands[0];
   }
 
-  // "photo-tidy@inari", a pane key, or a bare label when it's unique
+  // "photo-tidy@desk", a pane key, or a bare label when it's unique
   resolve(to) {
     const t = String(to || '').trim();
     if (!t) return null;

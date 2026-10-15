@@ -99,7 +99,7 @@ A message typed into a pane reads like a prompt from you, so any agent can steer
 
 ## Notes
 
-- Agent state comes from reading the screen. "esc to interrupt" means working, and a numbered menu with a cursor means waiting on you. `npm test` runs against real captured Claude Code screens.
+- Agent state comes from reading the screen. A spinner line above the input box (or "esc to interrupt") means working, and a numbered menu with a cursor means waiting on you. `npm test` runs against real captured Claude Code screens.
 - On psmux, panes are streamed rather than polled: one control-mode client per session (`psmux -C attach`) feeds each pane's output into a headless terminal emulator, because every `capture-pane` can flash the attached terminal. Each pane is read once when openone first sees it. Set `"stream": false` on a host to go back to polling.
 - psmux pane ids repeat across sessions, so openone always targets `session:window.%id`.
 - `npx electron tools/render-icons.js` rebuilds the PNG icons from `assets/*.svg`.

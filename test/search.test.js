@@ -3,7 +3,7 @@ const assert = require('node:assert');
 const { filter } = require('../src/ui/search');
 
 const panes = [
-  { key: 'a', label: 'er-apex', kind: 'claude', host: 'desk', title: 'train the v3 policy', summary: '' },
+  { key: 'a', label: 'rl-apex', kind: 'claude', host: 'desk', title: 'train the v3 policy', summary: '' },
   { key: 'b', label: 'shop', kind: 'claude', host: 'box', title: '', summary: 'Three tiers render side by side on the pricing page.' },
   { key: 'c', label: 'Code', kind: 'codex', host: 'desk', title: '', summary: '' },
   { key: 'd', label: 'apex-tools', kind: null, host: 'box', title: '', summary: '' },
@@ -16,7 +16,7 @@ test('search: name prefix beats a word in the summary', () => {
 });
 
 test('search: letters in order find a name', () => {
-  assert.equal(keys('erx')[0], 'a');
+  assert.equal(keys('rlx')[0], 'a');
 });
 
 test('search: words from the conversation find the agent', () => {

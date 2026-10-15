@@ -150,7 +150,7 @@ const TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
-        to: { type: 'string', description: 'Agent name from roster, like "photo-tidy@inari".' },
+        to: { type: 'string', description: 'Agent name from roster, like "photo-tidy@desk".' },
         content: { type: 'string', description: 'The message or task.' },
       },
       required: ['to', 'content'],
