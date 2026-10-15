@@ -14,6 +14,7 @@ const { Monitor } = require('../src/monitor');
 const actions = require('../src/actions');
 const projects = require('../src/projects');
 const { Embedder, semantic, projectText } = require('../src/embed');
+const { Bus, names } = require('../src/bus');
 
 
 const ROOT = path.join(__dirname, '..');
@@ -27,6 +28,16 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const monitor = new Monitor({ hostNames: cfg.hosts.map((h) => h.name) });
 const hosts = {};
+// agent-to-agent messages; typed into a pane through the same path as a reply
+const bus = new Bus({
+  monitor,
+  deliver: async (p, text) => {
+    const h = hosts[p.host];
+    await actions.reply(h.src, p, text);
+    monitor.markSeen(p.key);
+    pushState();
+  },
+});
 const clients = new Set();
 let lastState = '';
 
@@ -35,6 +46,7 @@ let lastState = '';
 function state() {
   return {
     panes: monitor.view(),
+    messages: bus.recent(40),
     hosts: Object.values(hosts).map((h) => ({ name: h.cfg.name, type: h.cfg.type, ok: h.ok, error: h.error, fed: !!fedRecently(h) })),
   };
 }
@@ -57,6 +69,7 @@ async function refresh(h) {
   h.error = '';
   for (const ev of monitor.ingest(h.cfg.name, raws)) broadcast('peek', ev);
   pushState();
+  bus.pump().then(pushState);
 }
 
 // A host with "feed": true is read by the desktop app on that machine, which posts its
@@ -200,14 +213,14 @@ async function api(req, res, parts) {
     }
     if (m === 'POST') {
       const body = await readJson(req);
-      if (c === 'answer') { await actions.answer(h.src, p, Number(body.n)); monitor.markSeen(p.key); }
-      else if (c === 'reply') { if (!String(body.text || '').trim()) return send(res, 400, { error: 'empty' }); await actions.reply(h.src, p, String(body.text)); monitor.markSeen(p.key); }
+      if (c === 'answer') { await actions.answer(h.src, p, Number(body.n)); monitor.markSeen(p.key); bus.touch(p.key); }
+      else if (c === 'reply') { if (!String(body.text || '').trim()) return send(res, 400, { error: 'empty' }); await actions.reply(h.src, p, String(body.text)); monitor.markSeen(p.key); bus.touch(p.key); }
       else if (c === 'keys') {
         const keys = Array.isArray(body.keys) ? body.keys.map(String) : [];
         if (!keys.length || !keys.every((k) => KEY.test(k))) return send(res, 400, { error: 'keys: names like Enter, Escape, C-c, 1' });
         await h.src.keys(p, keys);
       } else if (c === 'text') { await h.src.text(p, String(body.text || '')); }
-      else if (c === 'seen') monitor.markSeen(p.key);
+      else if (c === 'seen') { monitor.markSeen(p.key); bus.touch(p.key); }
       else if (c === 'focus') await h.src.focus(p.bg ? await h.src.attachBackground(p.bg) : p);
       else if (c === 'attach') {
         // background session -> a tmux window running `claude attach`; returns that pane's key
@@ -221,6 +234,8 @@ async function api(req, res, parts) {
       return send(res, 200, { ok: true });
     }
   }
+
+  if (a === 'bus') return busApi(req, res, b);
 
   if (m === 'POST' && a === 'hosts' && b && c === 'snapshot') {
     const h = hosts[decodeURIComponent(b)];
@@ -254,6 +269,87 @@ async function api(req, res, parts) {
       await h.src.killSession(decodeURIComponent(d));
       return send(res, 200, { ok: true });
     }
+  }
+  return send(res, 404, { error: 'not found' });
+}
+
+// ---------- agent tools (tools/mcp.js calls these) ----------
+//
+// The caller says which pane it runs in ({ host, pane, session } from $TMUX_PANE etc.),
+// which is how messages get a sender and replies find their way back.
+
+async function busApi(req, res, what) {
+  const m = req.method;
+  const q = new URL(req.url, 'http://x').searchParams;
+  const body = m === 'POST' ? await readJson(req) : {};
+  const meArg = m === 'POST' ? body.me || {} : { host: q.get('host'), pane: q.get('pane'), session: q.get('session') };
+  const me = bus.whoami(meArg);
+  const myName = me ? bus.names().get(me.key) : '';
+  const hostOf = (name) => {
+    const h = hosts[String(name || '')];
+    if (!h) throw Object.assign(new Error(`no host "${name}"; hosts: ${Object.keys(hosts).join(', ')}`), { code: 404 });
+    return h;
+  };
+
+  if (m === 'GET' && what === 'roster') {
+    return send(res, 200, { you: myName || null, hosts: Object.keys(hosts), agents: bus.roster(me) });
+  }
+  if (m === 'POST' && what === 'send') {
+    const fromName = meArg.host ? `outside@${String(meArg.host).toLowerCase()}` : '';
+    const msg = bus.send({ from: me, fromName, to: body.to, content: body.content });
+    pushState();
+    return send(res, 200, { id: msg.id, to: msg.to, status: msg.status, via: msg.via });
+  }
+  if (m === 'GET' && what === 'messages') return send(res, 200, bus.recent(Number(q.get('n')) || 40));
+  if (m === 'GET' && what === 'peek') {
+    const p = bus.resolve(q.get('name'));
+    if (!p) return send(res, 404, { error: `no agent named "${q.get('name')}"` });
+    const lines = Math.min(Number(q.get('lines')) || 60, 400);
+    const text = String(await hosts[p.host].src.screen(p, lines)).replace(/\s+$/, '').split('\n').slice(-lines).join('\n');
+    return send(res, 200, { name: bus.names().get(p.key), state: p.state, text });
+  }
+  if (m === 'GET' && what === 'projects') {
+    const want = q.get('host') ? [hostOf(q.get('host'))] : Object.values(hosts);
+    const nm = bus.names();
+    const agents = bus.agents();
+    const base = (s) => String(s || '').replace(/[\\/]+$/, '').split(/[\\/]/).pop().toLowerCase();
+    const out = await Promise.all(want.map(async (h) => {
+      const l = await projects.list(h).catch((e) => ({ host: h.cfg.name, error: String(e.message || e).split('\n')[0], dirs: [] }));
+      return {
+        host: l.host, workspace: l.workspace, error: l.error,
+        projects: l.dirs.map((d) => ({
+          name: d.name, about: d.about || '',
+          agents: agents.filter((p) => p.host === h.cfg.name && base(p.path) === d.name.toLowerCase()).map((p) => nm.get(p.key)),
+        })),
+      };
+    }));
+    return send(res, 200, out);
+  }
+  if (m === 'GET' && what === 'ls') {
+    return send(res, 200, await projects.ls(hostOf(q.get('host')), q.get('path') || ''));
+  }
+  if (m === 'POST' && what === 'start') {
+    const h = hostOf(body.host);
+    let prompt = String(body.prompt || '').trim();
+    if (prompt && myName) prompt = `[openone: started by ${myName}; report back with the openone send tool, to="${myName}"] ${prompt}`;
+    const np = await projects.start(h, cfg, {
+      folder: String(body.folder || ''), create: !!body.create, agent: String(body.agent || 'claude'), resume: !!body.resume, prompt,
+    });
+    await refresh(h);
+    const key = `${h.cfg.name}|${np.session}|${np.paneId}`;
+    const p = monitor.get(key);
+    const name = p ? names([...bus.agents().filter((x) => x.key !== key), { ...p, kind: p.kind || 'agent' }]).get(key) : key;
+    return send(res, 201, { name, key, note: 'it may take a few seconds to show up in roster' });
+  }
+  if (m === 'GET' && what === 'listen') {
+    // a Claude session started with the openone channel: messages are pushed here
+    if (!me) return send(res, 404, { error: 'not in a pane openone knows (yet)' });
+    res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' });
+    res.write(`event: hello\ndata: ${JSON.stringify({ you: myName })}\n\n`);
+    const off = bus.listen(me.key, (msg) => res.write(`event: message\ndata: ${JSON.stringify({ from: msg.from, content: msg.content, id: msg.id })}\n\n`));
+    const beat = setInterval(() => res.write(': ping\n\n'), 20000);
+    req.on('close', () => { clearInterval(beat); off(); });
+    return;
   }
   return send(res, 404, { error: 'not found' });
 }

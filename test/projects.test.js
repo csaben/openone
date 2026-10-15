@@ -61,3 +61,18 @@ test('newWindow: opens in the attached session and types the start line', async 
   assert.deepEqual(calls.find((a) => a[0] === 'new-window').slice(0, 6), ['new-window', '-d', '-t', 'main:', '-n', 'proj']);
   assert.ok(calls.some((a) => a[0] === 'send-keys' && a.includes('Enter')));
 });
+
+test('projects: ls lists under the workspace only', async () => {
+  const fs = require('fs');
+  const os = require('os');
+  const path = require('path');
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'oo-ls-'));
+  fs.mkdirSync(path.join(ws, 'app', 'src'), { recursive: true });
+  fs.writeFileSync(path.join(ws, 'app', 'README.md'), 'hello');
+  const h = { cfg: { name: 'box', type: 'tmux', workspace: ws }, src: new LocalSource({ type: 'tmux' }) };
+  const r = await P.ls(h, 'app');
+  assert.deepEqual(r.entries, [{ name: 'src', dir: true, size: 0 }, { name: 'README.md', dir: false, size: 5 }]);
+  await assert.rejects(P.ls(h, 'app/../..'), /not allowed/);
+  await assert.rejects(P.ls(h, 'C:x'), /not allowed/);
+  fs.rmSync(ws, { recursive: true, force: true });
+});

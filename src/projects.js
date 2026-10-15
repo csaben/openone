@@ -105,10 +105,22 @@ async function start(h, cfg, { folder, create, agent, resume, prompt }) {
   return h.src.newWindow({ name, line });
 }
 
+// What's inside a project: `rel` is a path under the workspace ("photo-tidy/src"), so
+// only the workspace can be listed. -> { host, path, entries: [{ name, dir, size }] }
+async function ls(h, rel = '') {
+  const parts = String(rel || '').split(/[\\/]+/).filter(Boolean);
+  for (const s of parts) if (s === '.' || s === '..' || /[:*?"<>|%\r\n]/.test(s)) throw new Error(`path not allowed: ${rel}`);
+  let dir = await h.src.resolve(workspace(h.cfg));
+  for (const s of parts) dir = h.src.join(dir, s);
+  const entries = await h.src.ls(dir);
+  entries.sort((a, b) => Number(b.dir) - Number(a.dir) || a.name.localeCompare(b.name));
+  return { host: h.cfg.name, path: dir, entries };
+}
+
 // argv for the `code` CLI: local folders open directly, remote ones over Remote-SSH
 function vscodeArgs(hc, dir) {
   if (/^ssh/.test(hc.type || '')) return ['--remote', `ssh-remote+${hc.vscode || hc.ssh}`, dir];
   return [dir];
 }
 
-module.exports = { list, start, slug, checkName, commandLine, vscodeArgs, workspace, agents, about, parseNotes };
+module.exports = { list, start, ls, slug, checkName, commandLine, vscodeArgs, workspace, agents, about, parseNotes };

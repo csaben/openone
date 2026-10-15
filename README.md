@@ -62,6 +62,40 @@ Host types: `tmux` (the server machine itself), `ssh` (remote tmux) and `ssh-psm
 | `POST /api/panes/:key/answer` `{n}` · `/reply` `{text}` · `/text` `{text}` · `/keys` `{keys}` · `/focus` · `/seen` | drive a pane |
 | `POST /api/hosts/:host/sessions` `{name, cwd, cmd}` | start a detached session and type `cmd` into it |
 | `DELETE /api/hosts/:host/sessions/:name` | kill a session |
+| `/api/bus/…` `roster` · `send` · `peek` · `projects` · `ls` · `start` · `listen` · `messages` | the agent tools below |
+
+### Agents talking to each other
+
+`src/mcp.js` is an MCP server (Node, no dependencies) that gives Claude Code and Codex these tools, backed by the openone server:
+
+| | |
+| --- | --- |
+| `roster` | every agent on every host: name (`label@host`), state, title, last turn's summary, and which one is you |
+| `send {to, content}` | message another agent |
+| `peek {name, lines}` | read another agent's screen |
+| `projects {host}` · `ls {host, path}` | the folders in each host's workspace, and what's inside them |
+| `start {host, folder, agent, prompt, create, resume}` | start a new agent in a project, with a first message signed by the caller |
+
+A message is typed into the target's chat as `[openone message from <name> …] <text>` once the target is idle, so it never interrupts a turn or a menu waiting for you. A Claude session started with `--dangerously-load-development-channels server:openone` gets it pushed right away as a channel event instead. The panel shows each agent's latest message on its row. A reply chain stops after 6 hops between agents until you step in (answering, replying or opening the agent resets it), and an agent can send 30 messages per 10 minutes.
+
+The tool finds its own pane from `$TMUX_PANE`, so messages carry a sender. Register it on each machine, pointing at the server:
+
+```bash
+claude mcp add -s user openone -e OPENONE_URL=https://<server>:8951 -- node /path/to/openone/src/mcp.js
+```
+
+```toml
+# ~/.codex/config.toml
+[mcp_servers.openone]
+command = "node"
+args = ["/path/to/openone/src/mcp.js"]
+env = { OPENONE_URL = "https://<server>:8951" }
+env_vars = ["TMUX", "TMUX_PANE", "PSMUX_SESSION"]
+```
+
+`OPENONE_HOST` overrides the host name the tool reports (default: the machine's hostname, which should match the host's `name` in the server config). On the desktop app, `"server": "https://<server>:8951"` in the config shows the messages in the panel.
+
+A message typed into a pane reads like a prompt from you, so any agent can steer any other. The tool tells agents to treat these as requests from a sibling, not from you, and every message is logged, but only use this between agents you'd let act on each other's behalf.
 
 ## Notes
 

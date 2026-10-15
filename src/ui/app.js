@@ -80,6 +80,18 @@ function who(p, go = true) {
     ${go ? `<span class="go">${OPEN}</span>` : ''}</div>`;
 }
 
+// the latest message this agent sent or got in the last half hour (agents messaging
+// each other through openone's MCP tools), as one line for its row
+function mailLine(p) {
+  const m = (S.messages || []).filter((x) => (x.toKey === p.key || x.fromKey === p.key) && Date.now() - x.at < 30 * 60000).pop();
+  if (!m) return '';
+  const short = (n) => String(n).replace(/@.*/, '');
+  const text = m.toKey === p.key
+    ? `${m.status === 'queued' ? 'message waiting' : m.status === 'failed' ? 'undelivered' : 'from'} ${short(m.from)}`
+    : `to ${short(m.to)}${m.status === 'queued' ? ' (waiting)' : m.status === 'failed' ? ' (failed)' : ''}`;
+  return `<div class="t2 mail ${m.status}" title="${esc(m.content)}">✉ ${esc(text)}: ${esc(m.content)}</div>`;
+}
+
 function marks(list, max) {
   const shown = list.slice(0, max).map((p) => `<span class="st ${status(p)}"></span>`).join('');
   const more = list.length > max ? `<span class="more">+${list.length - max}</span>` : '';
@@ -152,7 +164,7 @@ function agentsCard() {
     return `<div class="row ${p.kind ? '' : 'shell'} ${i++ === kb ? 'kb' : ''}" data-jump="${esc(p.key)}">
       <span class="st ${status(p)}"></span>
       <div class="mid"><div class="t1"><span class="nm">${esc(p.label)}</span><span class="kind">${esc(p.kind || 'shell')}${p.bg ? ' · background' : ''}${showHost ? ` · ${esc(p.host)}` : ''}</span></div>
-      <div class="t2">${esc(line)}</div></div>
+      <div class="t2">${esc(line)}</div>${mailLine(p)}</div>
       <span class="age">${esc(when(p))}</span></div>`;
   };
   let list;

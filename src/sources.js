@@ -352,6 +352,18 @@ class LocalSource extends TmuxSource {
     return out.sort((a, b) => b.mtime - a.mtime);
   }
 
+  // [{ name, dir, size }] for everything in dir
+  async ls(dir) {
+    const fs = require('fs');
+    const path = require('path');
+    const out = [];
+    for (const d of await fs.promises.readdir(dir, { withFileTypes: true })) {
+      const st = d.isDirectory() ? null : await fs.promises.stat(path.join(dir, d.name)).catch(() => null);
+      out.push({ name: d.name, dir: d.isDirectory(), size: st ? st.size : 0 });
+    }
+    return out;
+  }
+
   run(args) {
     return new Promise((resolve) => {
       execFile(this.bin, args, { windowsHide: true, maxBuffer: 16 << 20, timeout: 8000, encoding: 'utf8' },
@@ -506,6 +518,12 @@ class SshTmuxSource extends ShellSource {
     return out.split('\n').map((l) => l.match(/^@@([\d.]+) (.+)$/)).filter(Boolean)
       .map((m) => ({ name: m[2], mtime: Number(m[1]) * 1000 })).sort((a, b) => b.mtime - a.mtime);
   }
+
+  async ls(dir) {
+    const out = await this.exec([`find ${sq(dir)} -mindepth 1 -maxdepth 1 -printf '@@%y %s %f\\n' 2>/dev/null`]);
+    return out.split('\n').map((l) => l.match(/^@@(\S) (\d+) (.+)$/)).filter(Boolean)
+      .map((m) => ({ name: m[3], dir: m[1] === 'd', size: m[1] === 'd' ? 0 : Number(m[2]) }));
+  }
 }
 
 // Windows over ssh. In an ssh logon, PATH lookups can stall for minutes on a UNC entry
@@ -571,6 +589,19 @@ class SshPsmuxSource extends ShellSource {
     const out = this.clean(await this.exec([`dir /b /ad "${root}" 2>nul`, 'echo @@END']));
     return out.split(/\r?\n/).map((s) => s.trim()).filter((s) => s && s !== '@@END' && !s.startsWith('.') && !/^dir \/b/i.test(s))
       .map((name) => ({ name, mtime: 0 }));
+  }
+
+  async ls(dir) {
+    if (/["\r\n%]/.test(dir)) throw new Error('bad path');
+    const out = this.clean(await this.exec([`echo @@D`, `dir /b /a:d "${dir}" 2>nul`, 'echo @@F', `dir /b /a:-d "${dir}" 2>nul`, 'echo @@END']));
+    const res = [];
+    let mode = null;
+    for (const s of out.split(/\r?\n/).map((x) => x.trim())) {
+      if (s === '@@D' || s === '@@F' || s === '@@END') { mode = s; continue; }
+      if (!s || /^(echo |dir \/b)/i.test(s) || (mode !== '@@D' && mode !== '@@F')) continue;
+      res.push({ name: s, dir: mode === '@@D', size: 0 });
+    }
+    return res;
   }
 
   // drop the banner and the prompt cmd prints before every command

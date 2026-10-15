@@ -38,6 +38,7 @@ let monitor;
 let hosts = {};
 let muted = false;
 let pushTimer = null;
+let messages = []; // agent-to-agent messages, from the openone server ("server" in the config)
 const wt = new WindowsTerminal();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -128,6 +129,7 @@ function state() {
     hosts: Object.values(hosts).map((h) => ({ name: h.cfg.name, ok: h.ok, error: h.error })),
     showShells: !!cfg.showShells,
     muted,
+    messages,
   };
 }
 
@@ -225,6 +227,7 @@ async function jump(key) {
   const r = lookup(key);
   if (!r) return;
   monitor.markSeen(key);
+  tellServer(key);
   push();
   win.webContents.send('collapse');
   const pane = r.p.bg ? await r.h.src.attachBackground(r.p.bg).catch(() => null) : r.p;
@@ -293,6 +296,7 @@ async function answer(key, n) {
   if (!r) return;
   await actions.answer(r.h.src, r.p, n);
   monitor.markSeen(key);
+  tellServer(key);
   push();
 }
 
@@ -301,6 +305,7 @@ async function reply(key, text) {
   if (!r || !text.trim()) return;
   await actions.reply(r.h.src, r.p, text);
   monitor.markSeen(key);
+  tellServer(key);
   push();
 }
 
@@ -389,8 +394,27 @@ app.whenReady().then(() => {
   ipcMain.handle('project:semantic', (_e, q) => searchProjects(String(q || '')));
   ipcMain.handle('project:start', (_e, opts) => startProject(opts));
   ipcMain.handle('project:code', (_e, target) => openInCode(target));
-  ipcMain.on('pane:seen', (_e, key) => { monitor.markSeen(key); push(); });
+  ipcMain.on('pane:seen', (_e, key) => { monitor.markSeen(key); push(); tellServer(key); });
+  if (cfg.server) pollMessages();
 });
+
+// "server": "https://..." — the openone server that carries messages between agents.
+// The dock shows them on each agent's row, and tells the server when you use an agent
+// (which restarts that agent's reply chain count).
+const serverUrl = () => String(cfg.server || '').replace(/\/$/, '');
+async function pollMessages() {
+  for (;;) {
+    try {
+      const r = await fetch(`${serverUrl()}/api/bus/messages?n=40`, { signal: AbortSignal.timeout(8000) });
+      if (r.ok) { const m = await r.json(); if (JSON.stringify(m) !== JSON.stringify(messages)) { messages = m; push(); } }
+    } catch {}
+    await new Promise((r) => setTimeout(r, 4000));
+  }
+}
+function tellServer(key) {
+  if (!cfg.server || !key) return;
+  fetch(`${serverUrl()}/api/panes/${encodeURIComponent(key)}/seen`, { method: 'POST', signal: AbortSignal.timeout(8000) }).catch(() => {});
+}
 
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
