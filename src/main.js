@@ -7,6 +7,7 @@ const { createSource } = require('./sources');
 const { WindowsTerminal } = require('./wt');
 const actions = require('./actions');
 const projects = require('./projects');
+const { Embedder, semantic, projectText } = require('./embed');
 const { detect: detectConfig } = require('./setup');
 
 // Installed builds keep config in %APPDATA%\openone; a source checkout uses ./config.json.
@@ -234,9 +235,25 @@ async function jump(key) {
 
 // ---------- projects ----------
 
+let embedder = null;
+let lastProjects = [];
+
 async function listProjects() {
-  return Promise.all(Object.values(hosts).map((h) => projects.list(h)
+  lastProjects = await Promise.all(Object.values(hosts).map((h) => projects.list(h)
     .catch((e) => ({ host: h.cfg.name, error: String(e.message || e).split('\n')[0], dirs: [] }))));
+  // index the READMEs now, so the first search by meaning is instant
+  if (cfg.semantic !== false) {
+    if (!embedder) embedder = new Embedder(app.getPath('userData'));
+    embedder.warm(lastProjects.flatMap((h) => h.dirs.map((d) => ({ text: projectText(d.name, d.about) }))));
+  }
+  return lastProjects;
+}
+
+async function searchProjects(query) {
+  if (cfg.semantic === false) return { projects: {}, agents: {}, ready: false };
+  if (!embedder) embedder = new Embedder(app.getPath('userData'));
+  return semantic(embedder, query, lastProjects, monitor.view())
+    .catch((e) => ({ projects: {}, agents: {}, ready: false, error: String(e.message || e) }));
 }
 
 async function startProject(opts) {
@@ -369,6 +386,7 @@ app.whenReady().then(() => {
   ipcMain.handle('pane:answer', (_e, key, n) => answer(key, n));
   ipcMain.handle('pane:reply', (_e, key, text) => reply(key, text));
   ipcMain.handle('project:list', () => listProjects());
+  ipcMain.handle('project:semantic', (_e, q) => searchProjects(String(q || '')));
   ipcMain.handle('project:start', (_e, opts) => startProject(opts));
   ipcMain.handle('project:code', (_e, target) => openInCode(target));
   ipcMain.on('pane:seen', (_e, key) => { monitor.markSeen(key); push(); });

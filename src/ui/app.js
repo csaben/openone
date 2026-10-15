@@ -177,6 +177,7 @@ let proj = null;
 let projCache = null;
 const AGENT_KINDS = ['claude', 'codex'];
 const base = (s) => String(s || '').replace(/[\\/]+$/, '').split(/[\\/]/).pop().toLowerCase();
+const SIMILAR = 0.42; // embedding similarity that means "about the same thing" (see src/embed.js)
 const slug = (t) => String(t).toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^[-.]+|-+$/g, '').replace(/-{2,}/g, '-').slice(0, 40);
 
 function openProjects() {
@@ -192,6 +193,18 @@ function openProjects() {
       if (proj) { proj.list = list; render(); }
     }).catch((e) => { if (proj) { proj.list = []; proj.error = e.message; render(); } });
   }
+}
+
+let meaningTimer = null;
+function askMeaning() {
+  clearTimeout(meaningTimer);
+  meaningTimer = setTimeout(async () => {
+    if (!proj || !window.oo.semantic) return;
+    const { text } = projQuery();
+    if (!text) return;
+    const res = await window.oo.semantic(text).catch(() => null);
+    if (proj && res && projQuery().text === text) { proj.sem = { q: text, ...res }; render(); }
+  }, 150);
 }
 
 function closeProjects() {
@@ -240,11 +253,22 @@ function projRows() {
       .slice(0, 9).map((r) => ({ ...r, section: 'Recent projects' }));
   }
   const S2 = window.OOSearch;
-  const agents = S2.related(text, S.panes.filter((p) => p.kind && (!host || p.host.toLowerCase() === host))
-    .map((p) => ({ name: p.label, text: [p.title, p.question, p.summary].join(' '), p })), { min: 2 })
-    .slice(0, 3).map((m) => ({ type: 'agent', p: m.doc.p, hits: m.hits, section: 'Already running' }));
-  const projects = S2.related(text, all.map((r) => ({ name: r.name, text: r.about, r })))
-    .slice(0, 6).map((m) => ({ ...m.doc.r, hits: m.hits, section: 'Existing projects' }));
+  // matches by words (exact, explainable) and by meaning (embeddings, when the answer for
+  // this text has arrived), blended: a strong meaning match counts like a name match
+  const sem = proj.sem && proj.sem.q === text ? proj.sem : null;
+  const blend = (kw, sim) => (kw ? kw.score : 0) + (sim >= SIMILAR ? sim * 10 : 0);
+  const livePanes = S.panes.filter((p) => p.kind && (!host || p.host.toLowerCase() === host));
+  const kwAgents = new Map(S2.related(text, livePanes.map((p) => ({ name: p.label, text: [p.title, p.question, p.summary].join(' '), p })), { min: 2 })
+    .map((m) => [m.doc.p.key, m]));
+  const agents = livePanes.map((p) => ({ p, kw: kwAgents.get(p.key), sim: sem ? sem.agents[p.key] || 0 : 0 }))
+    .filter((x) => x.kw || x.sim >= SIMILAR + 0.03)
+    .sort((a, b) => blend(b.kw, b.sim) - blend(a.kw, a.sim)).slice(0, 3)
+    .map((x) => ({ type: 'agent', p: x.p, hits: x.kw ? x.kw.hits : [], sim: x.sim, section: 'Already running' }));
+  const kwProjects = new Map(S2.related(text, all.map((r) => ({ name: r.name, text: r.about, r }))).map((m) => [`${m.doc.r.host}|${m.doc.r.name}`, m]));
+  const projects = all.map((r) => ({ r, kw: kwProjects.get(`${r.host}|${r.name}`), sim: sem ? sem.projects[`${r.host}|${r.name}`] || 0 : 0 }))
+    .filter((x) => x.kw || x.sim >= SIMILAR)
+    .sort((a, b) => blend(b.kw, b.sim) - blend(a.kw, a.sim)).slice(0, 6)
+    .map((x) => ({ ...x.r, hits: x.kw ? x.kw.hits : [], sim: x.sim, section: 'Existing projects' }));
   const name = suggestName(text);
   const rows = [...agents, ...projects];
   if (!all.some((r) => r.name.toLowerCase() === name)) {
@@ -253,13 +277,16 @@ function projRows() {
   return rows;
 }
 
+// found by meaning rather than shared words
+const likeTag = (r) => (r.sim >= SIMILAR && !(r.hits || []).length ? '<span class="like" title="Similar in meaning">similar</span>' : '');
+
 function rowHtml(r, i) {
   const cls = `row ${i === proj.sel ? 'kb' : ''}`;
   if (r.type === 'agent') {
     const p = r.p;
     const line = p.title || p.summary || p.question || '';
     return `<div class="${cls}" data-proj="${i}"><span class="st ${status(p)}"></span>
-      <div class="mid"><div class="t1"><span class="nm">${esc(p.label)}</span><span class="kind">${esc(p.kind)} · ${esc(p.host)}</span></div>
+      <div class="mid"><div class="t1"><span class="nm">${esc(p.label)}</span><span class="kind">${esc(p.kind)} · ${esc(p.host)}</span>${likeTag(r)}</div>
       <div class="t2">${marked(line, r.hits)}</div></div><span class="go">${OPEN}</span></div>`;
   }
   if (r.type === 'new') {
@@ -271,7 +298,7 @@ function rowHtml(r, i) {
   const why = r.hits && r.about ? marked(r.about, r.hits) : esc(r.about);
   return `<div class="${cls}" data-proj="${i}"><span class="st ${run.length ? 'live' : 'idle'}"></span>
     <div class="mid"><div class="t1"><span class="nm">${r.hits ? marked(r.name, r.hits.filter((h) => h.where === 'name')) : esc(r.name)}</span>
-    <span class="kind">${esc(r.host)}${run.length ? ` · ${counted(run)} open` : ''}</span></div>
+    <span class="kind">${esc(r.host)}${run.length ? ` · ${counted(run)} open` : ''}</span>${likeTag(r)}</div>
     ${why ? `<div class="t2 about">${why}</div>` : ''}</div></div>`;
 }
 
@@ -630,7 +657,7 @@ body.addEventListener('click', (e) => {
 body.addEventListener('input', (e) => {
   if (e.target.id === 'reply' && cur) drafts[cur] = e.target.value;
   if (e.target.id === 'q') { query = e.target.value; kb = 0; render(); body.scrollTop = 0; }
-  if (e.target.id === 'pq' && proj) { proj.q = e.target.value; proj.sel = 0; render(); }
+  if (e.target.id === 'pq' && proj) { proj.q = e.target.value; proj.sel = 0; render(); askMeaning(); }
   if (e.target.id === 'pn' && proj && proj.pick) { proj.pick.name = e.target.value; proj.busy = ''; render(); }
 });
 

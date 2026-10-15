@@ -284,6 +284,7 @@
     reply: (key, text) => call('POST', `api/panes/${enc(key)}/reply`, { text }).catch((e) => toast(e.message)),
     seen: (key) => call('POST', `api/panes/${enc(key)}/seen`).catch(() => {}),
     projects: () => call('GET', 'api/projects'),
+    semantic: (q) => call('GET', `api/projects/semantic?q=${enc(q)}`),
     startProject: async (opts) => { const r = await call('POST', 'api/projects', opts); viewer(r.key); return r.key; },
   };
 

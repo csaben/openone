@@ -13,6 +13,11 @@ const { createSource } = require('../src/sources');
 const { Monitor } = require('../src/monitor');
 const actions = require('../src/actions');
 const projects = require('../src/projects');
+const { Embedder, semantic, projectText } = require('../src/embed');
+
+// meaning-based project search; the model and vectors live in ~/.cache/openone
+const embedder = cfg.semantic === false ? null : new Embedder(path.join(require('os').homedir(), '.cache', 'openone'));
+let lastProjects = [];
 
 const ROOT = path.join(__dirname, '..');
 const CONFIG = process.env.OPENONE_CONFIG || path.join(__dirname, 'config.json');
@@ -149,10 +154,19 @@ async function api(req, res, parts) {
   if (m === 'GET' && a === 'state') return send(res, 200, state());
   if (m === 'GET' && a === 'hosts') return send(res, 200, state().hosts);
 
+  if (m === 'GET' && a === 'projects' && b === 'semantic') {
+    if (!embedder) return send(res, 200, { projects: {}, agents: {}, ready: false });
+    const q = new URL(req.url, 'http://x').searchParams.get('q') || '';
+    return send(res, 200, await semantic(embedder, q, lastProjects, monitor.view())
+      .catch((e) => ({ projects: {}, agents: {}, ready: false, error: String(e.message || e) })));
+  }
+
   if (a === 'projects' && !b) {
     if (m === 'GET') {
-      return send(res, 200, await Promise.all(Object.values(hosts).map((h) => projects.list(h)
-        .catch((e) => ({ host: h.cfg.name, error: String(e.message || e).split('\n')[0], dirs: [] })))));
+      lastProjects = await Promise.all(Object.values(hosts).map((h) => projects.list(h)
+        .catch((e) => ({ host: h.cfg.name, error: String(e.message || e).split('\n')[0], dirs: [] }))));
+      if (embedder) embedder.warm(lastProjects.flatMap((h) => h.dirs.map((d) => ({ text: projectText(d.name, d.about) }))));
+      return send(res, 200, lastProjects);
     }
     if (m === 'POST') {
       const body = await readJson(req);

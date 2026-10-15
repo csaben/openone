@@ -111,7 +111,7 @@
       <div class="text">
         <span class="tag">Found in a README</span>
         <h3>It reads what projects are about</h3>
-        <p>Folder names aren't enough: "google drive cleanup" should find <code>photo-tidy</code>. So openone reads the start of each project's <code>README.md</code> (or <code>AGENTS.md</code>, <code>CLAUDE.md</code>, <code>package.json</code>) on every machine and matches your words against it.</p>
+        <p>Folder names aren't enough: "google drive cleanup" should find <code>photo-tidy</code>. So openone reads the start of each project's <code>README.md</code> (or <code>AGENTS.md</code>, <code>CLAUDE.md</code>, <code>package.json</code>) on every machine and matches your words against it, and their meaning too: "cloud backup for pictures" finds it as well, tagged <i>similar</i>.</p>
         <p class="muted">Picking an existing project continues it: same folder, last chat resumed, and what you typed sent as the next message.</p>
       </div>
       <img src="project-existing.png" alt="Typing 'google drive cleanup for my photos' finds photo-tidy from its README">
@@ -189,7 +189,8 @@
 
   <h2>Good to know</h2>
   <ul>
-    <li>Matching is by words, not meaning: "google drive photos" finds a README that says "Google Drive photos folder", but "cloud backup for pictures" won't. A project with no README is matched by its folder name only.</li>
+    <li>Matching is by words <i>and</i> by meaning. A small embedding model (all-MiniLM-L6-v2, 23&nbsp;MB, runs on the CPU) indexes each README summary once, so "cloud backup for pictures" finds a README about archiving photos. Rows found only by meaning are tagged <span style="color:#b48cf2">similar</span>. The model downloads the first time you search, and indexing takes a few seconds once; after that a search takes milliseconds.</li>
+    <li>A project with no README is matched by its folder name only.</li>
     <li>Project descriptions are cached for 10 minutes, so a README you just wrote may take a moment to count.</li>
     <li>Codex can't take a message when resuming, so <i>continue</i> with codex opens the last chat and you type it there.</li>
   </ul>

@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('oo', {
   reply: (key, text) => ipcRenderer.invoke('pane:reply', key, text),
   seen: (key) => ipcRenderer.send('pane:seen', key),
   projects: () => ipcRenderer.invoke('project:list'),
+  semantic: (q) => ipcRenderer.invoke('project:semantic', q),
   startProject: (opts) => ipcRenderer.invoke('project:start', opts),
   code: (target) => ipcRenderer.invoke('project:code', target),
 });
