@@ -408,7 +408,7 @@ class ShellSource extends TmuxSource {
   }
 
   // Runs raw shell lines; calls are serialized on the one connection.
-  exec(lines) {
+  exec(lines, timeoutMs) {
     const run = async () => {
       this.connect();
       if (!this.proc) throw new Error('ssh not running');
@@ -418,7 +418,7 @@ class ShellSource extends TmuxSource {
         await this.raw(this.init());
         await this.setup();
       }
-      return this.raw(lines);
+      return this.raw(lines, timeoutMs);
     };
     const p = this.chain.then(run, run);
     this.chain = p.catch(() => {});
@@ -562,7 +562,7 @@ class SshPsmuxSource extends ShellSource {
       `foreach ($f in @(${NOTE_FILES.map((f) => `'${f}'`).join(',')})) { $p = Join-Path $_.FullName $f; ` +
       `if (Test-Path -LiteralPath $p) { $t = [IO.File]::ReadAllText($p); $t.Substring(0, [Math]::Min(${NOTE_BYTES}, $t.Length)); break } } }`;
     const enc = Buffer.from(ps, 'utf16le').toString('base64');
-    return this.clean(await this.raw([`${POWERSHELL} -NoLogo -NoProfile -NonInteractive -EncodedCommand ${enc} < NUL`], 30000));
+    return this.clean(await this.exec([`${POWERSHELL} -NoLogo -NoProfile -NonInteractive -EncodedCommand ${enc} < NUL`], 30000));
   }
 
   async listDirs(dir) {
