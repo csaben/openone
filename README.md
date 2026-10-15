@@ -40,7 +40,7 @@ On first run it writes `config.json` (to `%APPDATA%\openone` for an installed co
 
 ### Projects
 
-**n** in the panel starts or continues work in a project folder. Type what you're working on: it matches the folders in each host's `workspace`, or offers a new folder named after what you typed. Add a host name ("drive backup cradle") to pick where it goes. Then choose claude or codex and whether to continue the last chat, and **Enter** opens a new window in the tmux session that host's terminal tab shows, `cd`s into the folder (creating it if new) and starts the agent. **o** opens the folder in VS Code, over Remote-SSH for ssh hosts; **o** on a row of the agent list opens that pane's folder.
+**n** in the panel starts or continues work in a project folder. Type what you're working on: it matches the folders in each host's `workspace`, or offers a new folder named after what you typed. Add a host name ("drive backup devbox") to pick where it goes. Then choose claude or codex and whether to continue the last chat, and **Enter** opens a new window in the tmux session that host's terminal tab shows, `cd`s into the folder (creating it if new) and starts the agent. **o** opens the folder in VS Code, over Remote-SSH for ssh hosts; **o** on a row of the agent list opens that pane's folder.
 
 Before offering a new folder, the picker checks every host for work that already covers it: agents whose title or output match, and project folders whose name or README match, by words and by meaning. Meaning comes from a small embedding model (all-MiniLM-L6-v2, 8-bit ONNX, 23 MB) run on the CPU through WebAssembly in a worker thread; it downloads on first use, each README summary is embedded once and cached, and a search takes a few milliseconds. `"semantic": false` turns it off.
 
@@ -49,6 +49,8 @@ Per host, `workspace` is the folder that holds your projects (default `~/Code`),
 ## Server (web and phone, experimental)
 
 `server/` runs the same watcher on an always-on Linux box. It reaches every machine over ssh, serves the same panel as a web page, and exposes an HTTP API to answer agents and start new sessions. It keeps no state of its own; tmux on each machine is the source of truth.
+
+The phone view is this web page, not an app: there's no APK or iOS build. Open the server's address on your phone over Tailscale and use **Add to Home Screen** to get an app-like icon. Notifications only arrive while the page is open (no push yet).
 
 ```bash
 cp server/config.example.json server/config.json    # list your hosts
