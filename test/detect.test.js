@@ -30,6 +30,7 @@ test('AskUserQuestion menu keeps question, recommended flag, drops free-text row
 test('spinner footer is working', () => {
   assert.equal(detect(fx('claude-working.txt')).state, 'working');
   assert.equal(detect(fx('claude-working-tool.txt')).state, 'working');
+  assert.equal(detect(fx('claude-working-nohint.txt')).state, 'working'); // newer Claude Code: no "esc to interrupt"
 });
 
 test('finished turn is idle with summary and finish time', () => {

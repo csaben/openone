@@ -102,13 +102,28 @@ function finished(lines) {
   return { at: '', turn: '' };
 }
 
+// a spinner line just above the input box (the box starts at the last-but-one rule)
+function spinning(lines) {
+  const rules = [];
+  for (let i = lines.length - 1; i >= 0 && i >= lines.length - 14 && rules.length < 2; i--) if (RULE.test(lines[i])) rules.unshift(i);
+  const top = rules.length ? rules[0] : lines.length;
+  for (let i = top - 1; i >= 0 && i >= top - 4; i--) {
+    if (/^\s*[✻✳✢✶✽✦·*]\s+\S[^·(]*…/.test(lines[i])) return true;
+    if (lines[i].trim()) return false;
+  }
+  return false;
+}
+
 function detect(text, meta = {}) {
   const lines = text.replace(/\r/g, '').split('\n');
   while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
   const kind = detectKind(text, meta);
   if (!kind) return { kind: null, state: 'shell' };
   const footer = lines.slice(-8).join('\n');
-  const working = /esc to interrupt/i.test(footer);
+  // Older Claude Code (and Codex) print "esc to interrupt"; newer Claude Code only shows
+  // the spinner line above the input box: "* Infusing… (10m 58s · ↓ 35k tokens)". A
+  // finished turn's line has no "…" ("✻ Brewed for 4s · done 11:20 PM").
+  const working = /esc to interrupt/i.test(footer) || spinning(lines);
   const menu = working ? null : findMenu(lines);
   const waitHint = /esc to cancel|enter to (select|confirm)|do you want to|would you like to/i.test(lines.slice(-30).join('\n'));
   if (menu && (waitHint || menu.options.length)) {
