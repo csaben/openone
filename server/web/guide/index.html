@@ -36,7 +36,7 @@
     background: var(--panel); border: 1px solid var(--edge); border-radius: 18px; padding: 24px; }
   .step .text::before { counter-increment: step; content: counter(step); display: grid; place-items: center; width: 28px; height: 28px;
     border-radius: 50%; background: var(--blue); color: #fff; font-weight: 700; font-size: 14px; margin-bottom: 12px; }
-  .step img { width: 100%; height: auto; display: block; border-radius: 12px; }
+  .step img, .shot { width: 100%; height: auto; display: block; border-radius: 12px; background: #101114; }
   .step .pair { display: grid; gap: 12px; }
   .step p:last-child { margin-bottom: 0; }
   .tag { display: inline-block; font-size: 12px; font-weight: 600; letter-spacing: .4px; text-transform: uppercase; color: var(--amber); margin-bottom: 4px; }
@@ -73,7 +73,7 @@
 <body>
 <main>
   <header>
-    <div class="brand"><img src="../assets/spiky-cloud-white-small.svg" alt="">openone</div>
+    <div class="brand"><picture><source srcset="../assets/spiky-cloud-black-small.svg" media="(prefers-color-scheme: light)"><img src="../assets/spiky-cloud-white-small.svg" alt=""></picture>openone</div>
     <h1>Starting and continuing work</h1>
     <p class="lede">Tell openone what you want to work on. Before it makes anything new, it checks every machine for work that already covers it, so you don't find out later that you'd already started.</p>
   </header>
@@ -154,7 +154,7 @@
   </div>
 
   <h2>Everything else in the panel</h2>
-  <img src="agents.png" alt="The agent list" style="max-width: 420px; width: 100%; display: block; margin: 18px 0 8px; border-radius: 12px">
+  <img class="shot" src="agents.png" alt="The agent list" style="max-width: 420px; margin: 18px 0 8px">
   <table class="keys">
     <tr><td><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Space</kbd></td><td>Open or close the panel, on the agent list with the most urgent agent selected</td></tr>
     <tr><td><kbd>j</kbd> <kbd>k</kbd></td><td>Move up and down (arrows work too)</td></tr>
