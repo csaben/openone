@@ -57,18 +57,33 @@ class Bus {
     this.hopIn = new Map(); // pane key -> { hop, at } of the last message it received
     this.sent = new Map(); // pane key -> [times]
     this.busy = false;
+    this.threads = new Map(); // Codex thread id -> pane key, once worked out
   }
 
   agents() { return this.monitor.view().filter((p) => p.kind); }
 
   names() { return names(this.agents()); }
 
-  // the pane an MCP client runs in: { host, pane: "%12", session? } -> monitor record
-  whoami({ host, pane, session } = {}) {
-    if (!host || !pane) return null;
+  // The pane an MCP client runs in -> monitor record, or null.
+  //   { host, pane: "%12", session? }  from $TMUX_PANE or the client's parent processes
+  //   { host, thread, cwd }            Codex: one MCP process serves every Codex session, so
+  //                                    the caller is the Codex pane in that folder; if there
+  //                                    are several, the one that's working (it's mid-turn
+  //                                    when it calls a tool). Remembered per thread.
+  whoami({ host, pane, session, thread, cwd } = {}) {
+    if (!host) return null;
     const h = String(host).toLowerCase();
-    const all = this.monitor.view().filter((p) => p.host.toLowerCase() === h && p.paneId === pane);
-    return all.find((p) => !session || p.session === session) || null;
+    const view = this.monitor.view().filter((p) => p.host.toLowerCase() === h);
+    if (pane) return view.filter((p) => p.paneId === pane).find((p) => !session || p.session === session) || null;
+    if (!thread) return null;
+    const known = this.threads.get(thread);
+    if (known) { const p = view.find((x) => x.key === known); if (p) return p; }
+    const norm = (s) => String(s || '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+    let cands = view.filter((p) => p.kind === 'codex' && (!cwd || norm(p.path) === norm(cwd)));
+    if (cands.length > 1) cands = cands.filter((p) => p.state === 'working');
+    if (cands.length !== 1) return null;
+    this.threads.set(thread, cands[0].key);
+    return cands[0];
   }
 
   // "photo-tidy@inari", a pane key, or a bare label when it's unique

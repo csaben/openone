@@ -282,7 +282,7 @@ async function busApi(req, res, what) {
   const m = req.method;
   const q = new URL(req.url, 'http://x').searchParams;
   const body = m === 'POST' ? await readJson(req) : {};
-  const meArg = m === 'POST' ? body.me || {} : { host: q.get('host'), pane: q.get('pane'), session: q.get('session') };
+  const meArg = m === 'POST' ? body.me || {} : { host: q.get('host'), pane: q.get('pane'), session: q.get('session'), thread: q.get('thread'), cwd: q.get('cwd') };
   const me = bus.whoami(meArg);
   const myName = me ? bus.names().get(me.key) : '';
   const hostOf = (name) => {

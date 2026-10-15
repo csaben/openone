@@ -6,9 +6,10 @@
 //   OPENONE_URL   the openone server (default http://127.0.0.1:8950)
 //   OPENONE_HOST  this machine's host name in the server's config (default: hostname)
 //
-// It finds its own pane from $TMUX_PANE (and the session), so messages carry a sender
-// and replies come back to it. Codex passes only some variables to MCP servers: list
-// TMUX, TMUX_PANE and PSMUX_SESSION in env_vars.
+// It finds its own pane from $TMUX_PANE (and the session), or from its parent processes,
+// so messages carry a sender and replies come back to it. Codex runs one copy for all its
+// sessions (from its app-server), so there each call carries the Codex thread id and that
+// thread's folder instead, and the server works out the pane from those.
 //
 // A Claude session started with `--dangerously-load-development-channels server:openone`
 // (or with OPENONE_CHANNEL=1) also gets messages pushed as channel events; any other
@@ -83,10 +84,46 @@ function channelOn() {
 
 const qs = (o) => new URLSearchParams(Object.entries(o).filter(([, v]) => v !== undefined && v !== '')).toString();
 
-async function call(method, what, data = {}) {
-  const url = `${URL_}/api/bus/${what}${method === 'GET' ? `?${qs({ ...ME, ...data })}` : ''}`;
+// Codex: the thread a tool call comes from, and the folder that thread runs in (from the
+// first line of its session log, ~/.codex/sessions/YYYY/MM/DD/rollout-...-<thread>.jsonl)
+const threadDirs = new Map();
+function codexThread(meta) {
+  const m = meta || {};
+  const thread = String(m.threadId || (m['x-codex-turn-metadata'] || {}).thread_id || '');
+  if (!/^[0-9a-f-]{20,}$/i.test(thread)) return null;
+  if (!threadDirs.has(thread)) threadDirs.set(thread, findThreadDir(thread));
+  return { thread, cwd: threadDirs.get(thread) };
+}
+function findThreadDir(thread) {
+  const path = require('path');
+  const root = path.join(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), 'sessions');
+  const desc = (d) => { try { return fs.readdirSync(d).sort().reverse(); } catch { return []; } };
+  let days = 0;
+  for (const y of desc(root)) {
+    for (const mo of desc(path.join(root, y))) {
+      for (const d of desc(path.join(root, y, mo))) {
+        if (++days > 60) return '';
+        const f = desc(path.join(root, y, mo, d)).find((n) => n.endsWith(`-${thread}.jsonl`));
+        if (!f) continue;
+        try {
+          const fd = fs.openSync(path.join(root, y, mo, d, f), 'r');
+          const buf = Buffer.alloc(65536);
+          const n = fs.readSync(fd, buf, 0, buf.length, 0);
+          fs.closeSync(fd);
+          const first = buf.slice(0, n).toString('utf8').split('\n')[0];
+          const cwd = (first.match(/"cwd":"((?:[^"\\]|\\.)*)"/) || [])[1];
+          return cwd ? JSON.parse(`"${cwd}"`) : '';
+        } catch { return ''; }
+      }
+    }
+  }
+  return '';
+}
+
+async function call(method, what, data = {}, who = ME) {
+  const url = `${URL_}/api/bus/${what}${method === 'GET' ? `?${qs({ ...who, ...data })}` : ''}`;
   const r = await fetch(url, method === 'GET' ? {} : {
-    method, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ me: ME, ...data }),
+    method, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ me: who, ...data }),
   });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(j.error || `openone server: HTTP ${r.status}`);
@@ -162,34 +199,34 @@ const TOOLS = [
 
 const size = (n) => (n < 1024 ? `${n} B` : n < 1 << 20 ? `${(n / 1024).toFixed(1)} KB` : `${(n / (1 << 20)).toFixed(1)} MB`);
 
-async function run(name, a) {
+async function run(name, a, who) {
   if (name === 'roster') {
-    const r = await call('GET', 'roster');
+    const r = await call('GET', 'roster', {}, who);
     const lines = r.agents.map((x) => `${x.you ? '* ' : '  '}${x.name} (${x.kind}${x.background ? ', background' : ''}) ${x.state}` +
       `${x.title ? ` · ${x.title}` : ''}${x.summary ? `\n      last: ${x.summary.slice(0, 200)}` : ''}`);
-    return `${r.you ? `You are ${r.you}.` : `openone doesn't know which pane you're in (host ${HOST}, pane ${ME.pane || 'none'}), so your messages go out unsigned.`}\n` +
+    return `${r.you ? `You are ${r.you}.` : `openone couldn't tell which pane you're in (host ${HOST}, pane ${who.pane || 'none'}${who.cwd ? `, folder ${who.cwd}` : ''}), so your messages go out unsigned.`}\n` +
       `Hosts: ${r.hosts.join(', ')}\n\n${lines.join('\n') || '(no agents)'}`;
   }
   if (name === 'send') {
-    const r = await call('POST', 'send', { to: a.to, content: a.content });
+    const r = await call('POST', 'send', { to: a.to, content: a.content }, who);
     if (r.status === 'delivered') return `Delivered to ${r.to} (${r.via}).`;
     return `Sent to ${r.to}. It's typed into its chat once it's idle; its reply will arrive in your chat the same way.`;
   }
   if (name === 'peek') {
-    const r = await call('GET', 'peek', { name: a.name, lines: a.lines });
+    const r = await call('GET', 'peek', { name: a.name, lines: a.lines }, who);
     return `${r.name} (${r.state}):\n${String(r.text).replace(/\s+$/, '')}`;
   }
   if (name === 'projects') {
-    const r = await call('GET', 'projects', { host: a.host });
+    const r = await call('GET', 'projects', { host: a.host }, who);
     return r.map((h) => `${h.host}: ${h.workspace || ''}${h.error ? ` (error: ${h.error})` : ''}\n` +
       h.projects.map((p) => `  ${p.name}${p.agents.length ? ` [running: ${p.agents.join(', ')}]` : ''}${p.about ? ` - ${p.about.slice(0, 160)}` : ''}`).join('\n')).join('\n\n');
   }
   if (name === 'ls') {
-    const r = await call('GET', 'ls', { host: a.host, path: a.path });
+    const r = await call('GET', 'ls', { host: a.host, path: a.path }, who);
     return `${r.host}: ${r.path}\n${r.entries.map((e) => (e.dir ? `  ${e.name}/` : `  ${e.name}${e.size ? `  ${size(e.size)}` : ''}`)).join('\n') || '  (empty)'}`;
   }
   if (name === 'start') {
-    const r = await call('POST', 'start', a);
+    const r = await call('POST', 'start', a, who);
     return `Started ${r.name}. ${r.note}.`;
   }
   throw new Error(`unknown tool: ${name}`);
@@ -218,7 +255,9 @@ async function handle(msg) {
   if (method === 'tools/list') return out({ jsonrpc: '2.0', id, result: { tools: TOOLS } });
   if (method === 'tools/call') {
     try {
-      const text = await run(params.name, params.arguments || {});
+      const t = ME.pane ? null : codexThread(params._meta);
+      const who = t ? { ...ME, thread: t.thread, cwd: t.cwd } : ME;
+      const text = await run(params.name, params.arguments || {}, who);
       out({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text }] } });
     } catch (e) {
       out({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: String(e.message || e) }], isError: true } });

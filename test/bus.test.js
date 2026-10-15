@@ -90,3 +90,18 @@ test('bus: a gone or exited target fails the message', async () => {
   assert.equal(m.status, 'failed');
   assert.match(m.error, /exited/);
 });
+
+test('bus: a Codex caller is the Codex pane in its folder, the working one if several', () => {
+  const panes = [
+    pane('b|s|%1', 'x', { kind: 'codex', path: '/w/app' }),
+    pane('b|s|%2', 'y', { kind: 'codex', path: '/w/app', state: 'working' }),
+    pane('b|s|%3', 'z', { kind: 'codex', path: '/w/other' }),
+    pane('b|s|%4', 'c', { kind: 'claude', path: '/w/other' }),
+  ];
+  const { bus } = setup(panes);
+  assert.equal(bus.whoami({ host: 'b', thread: 't-1', cwd: '/w/other/' }).key, 'b|s|%3');
+  assert.equal(bus.whoami({ host: 'b', thread: 't-2', cwd: '/w/app' }).key, 'b|s|%2');
+  panes[1].state = 'idle';
+  assert.equal(bus.whoami({ host: 'b', thread: 't-2', cwd: '/w/app' }).key, 'b|s|%2'); // remembered
+  assert.equal(bus.whoami({ host: 'b', thread: 't-3', cwd: '/w/app' }), null); // two idle ones: can't tell
+});
