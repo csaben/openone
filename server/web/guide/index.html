@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>openone guide</title>
+<link rel="icon" href="../assets/spiky-cloud-white-small.svg">
+<style>
+  :root {
+    --bg: #0b0c0e; --panel: #15161a; --panel-2: #1d1e23; --edge: rgba(255, 255, 255, .08);
+    --text: #e9eaee; --muted: #9a9ea8; --dim: #6b6f78; --blue: #4a8ff7; --amber: #e5c07b; --green: #3fcf74;
+    --sans: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+    --mono: "Cascadia Mono", ui-monospace, Menlo, Consolas, monospace;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.6 var(--sans); -webkit-font-smoothing: antialiased; }
+  main { max-width: 860px; margin: 0 auto; padding: 56px 20px 96px; }
+  header { margin-bottom: 40px; }
+  .brand { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 14px; letter-spacing: .3px; }
+  .brand img { width: 22px; height: 22px; }
+  h1 { font-size: 34px; line-height: 1.15; margin: 14px 0 12px; letter-spacing: -.5px; }
+  .lede { color: var(--muted); font-size: 18px; max-width: 640px; margin: 0; }
+  h2 { font-size: 22px; margin: 64px 0 10px; letter-spacing: -.2px; }
+  h3 { font-size: 16px; margin: 0 0 6px; }
+  p { margin: 0 0 14px; }
+  a { color: var(--blue); }
+  code, kbd { font-family: var(--mono); font-size: .86em; }
+  code { background: var(--panel-2); border: 1px solid var(--edge); border-radius: 5px; padding: 1px 6px; }
+  kbd { display: inline-block; min-width: 1.6em; text-align: center; background: var(--panel-2); border: 1px solid var(--edge); border-bottom-width: 2px; border-radius: 5px; padding: 0 6px; color: var(--text); }
+  .muted { color: var(--muted); }
+
+  /* the flow: numbered steps, each with its screenshot */
+  .steps { counter-reset: step; display: grid; gap: 28px; margin-top: 24px; }
+  .step { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr); gap: 28px; align-items: center;
+    background: var(--panel); border: 1px solid var(--edge); border-radius: 18px; padding: 24px; }
+  .step .text::before { counter-increment: step; content: counter(step); display: grid; place-items: center; width: 28px; height: 28px;
+    border-radius: 50%; background: var(--blue); color: #fff; font-weight: 700; font-size: 14px; margin-bottom: 12px; }
+  .step img { width: 100%; height: auto; display: block; border-radius: 12px; }
+  .step .pair { display: grid; gap: 12px; }
+  .step p:last-child { margin-bottom: 0; }
+  .tag { display: inline-block; font-size: 12px; font-weight: 600; letter-spacing: .4px; text-transform: uppercase; color: var(--amber); margin-bottom: 4px; }
+
+  .keys { width: 100%; border-collapse: collapse; margin: 14px 0 4px; font-size: 15px; }
+  .keys td { padding: 9px 12px; border-top: 1px solid var(--edge); vertical-align: top; }
+  .keys td:first-child { white-space: nowrap; width: 1%; }
+  .keys tr:first-child td { border-top: 0; }
+
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; margin-top: 16px; }
+  .card { background: var(--panel); border: 1px solid var(--edge); border-radius: 14px; padding: 18px; }
+  .card p { color: var(--muted); font-size: 15px; margin: 0; }
+
+  .flowline { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 18px 0 6px; font-size: 14px; }
+  .flowline span { background: var(--panel-2); border: 1px solid var(--edge); border-radius: 999px; padding: 5px 12px; }
+  .flowline i { color: var(--dim); font-style: normal; }
+
+  pre { background: var(--panel); border: 1px solid var(--edge); border-radius: 12px; padding: 16px; overflow-x: auto; font: 13.5px/1.55 var(--mono); }
+  ul { padding-left: 20px; margin: 0 0 14px; }
+  li { margin: 4px 0; }
+  footer { margin-top: 72px; color: var(--dim); font-size: 14px; }
+
+  @media (max-width: 720px) {
+    main { padding: 32px 16px 72px; }
+    h1 { font-size: 28px; }
+    .step { grid-template-columns: 1fr; padding: 18px; gap: 18px; }
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg: #f6f7f9; --panel: #fff; --panel-2: #eef0f3; --edge: rgba(0, 0, 0, .09); --text: #16181d; --muted: #5d636e; --dim: #8a9099; --amber: #a86b00; color-scheme: light; }
+    .step img { box-shadow: 0 8px 24px rgba(0, 0, 0, .18); }
+  }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="brand"><img src="../assets/spiky-cloud-white-small.svg" alt="">openone</div>
+    <h1>Starting and continuing work</h1>
+    <p class="lede">Tell openone what you want to work on. Before it makes anything new, it checks every machine for work that already covers it, so you don't find out later that you'd already started.</p>
+  </header>
+
+  <div class="flowline"><span><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Space</kbd></span><i>→</i><span><kbd>n</kbd> describe it</span><i>→</i><span>existing work?</span><i>→</i><span>continue or start fresh</span><i>→</i><span><kbd>Enter</kbd> agent starts</span></div>
+
+  <h2>The flow</h2>
+  <div class="steps">
+    <section class="step">
+      <div class="text">
+        <h3>Open the panel and press <kbd>n</kbd></h3>
+        <p><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Space</kbd> opens openone from anywhere. <kbd>n</kbd> asks what you're working on.</p>
+        <p class="muted">Before you type, it lists recent projects across your machines, the ones with agents open first.</p>
+      </div>
+      <img src="project-empty.png" alt="The project picker before typing, listing recent projects">
+    </section>
+
+    <section class="step">
+      <div class="text">
+        <span class="tag">Already exists</span>
+        <h3>Describe it in your own words</h3>
+        <p>As you type, it searches every machine for two kinds of existing work:</p>
+        <ul>
+          <li><b>Already running:</b> agents whose title or latest output match. <kbd>Enter</kbd> jumps straight to that terminal.</li>
+          <li><b>Existing projects:</b> folders whose name or README match, with the matching words in bold.</li>
+        </ul>
+        <p class="muted">The yellow line tells you how many things might already cover it.</p>
+      </div>
+      <div class="pair">
+        <img src="project-running.png" alt="Typing 'rom map stitching' finds a running agent and an existing project">
+      </div>
+    </section>
+
+    <section class="step">
+      <div class="text">
+        <span class="tag">Found in a README</span>
+        <h3>It reads what projects are about</h3>
+        <p>Folder names aren't enough: "google drive cleanup" should find <code>photo-tidy</code>. So openone reads the start of each project's <code>README.md</code> (or <code>AGENTS.md</code>, <code>CLAUDE.md</code>, <code>package.json</code>) on every machine and matches your words against it.</p>
+        <p class="muted">Picking an existing project continues it: same folder, last chat resumed, and what you typed sent as the next message.</p>
+      </div>
+      <img src="project-existing.png" alt="Typing 'google drive cleanup for my photos' finds photo-tidy from its README">
+    </section>
+
+    <section class="step">
+      <div class="text">
+        <span class="tag" style="color: var(--muted)">Nothing yet</span>
+        <h3>Nothing matches: start fresh</h3>
+        <p>If no machine has anything like it, it says so and offers a new folder with a short name taken from your words.</p>
+        <p>Mention a machine (“…mood tagger <b>linux-box</b>”) to pick where it goes. If you don't, it asks in the next step.</p>
+      </div>
+      <img src="project-fresh.png" alt="A new idea matches nothing and is offered as a new folder">
+    </section>
+
+    <section class="step">
+      <div class="text">
+        <h3>Confirm, then <kbd>Enter</kbd></h3>
+        <p><kbd>↑</kbd><kbd>↓</kbd> move between options and <kbd>←</kbd><kbd>→</kbd> change them:</p>
+        <ul>
+          <li><b>Name</b> and <b>Host</b>, for a new folder</li>
+          <li><b>Agent:</b> claude or codex</li>
+          <li><b>Chat:</b> continue the last one or start new, for an existing folder</li>
+          <li><b>Message:</b> send what you typed as the agent's first message, so you don't explain it twice</li>
+        </ul>
+      </div>
+      <div class="pair">
+        <img src="confirm-new.png" alt="Confirming a new project: name, host, agent, first message">
+      </div>
+    </section>
+
+    <section class="step">
+      <div class="text">
+        <h3>The agent starts where you can see it</h3>
+        <p>openone opens a new window in the tmux session that machine's Windows Terminal tab is showing. It creates the folder if it's new, <code>cd</code>s into it, starts the agent with your message, and switches the tab to it.</p>
+        <p><kbd>o</kbd> (or the VS Code button) opens the folder in VS Code. Folders on another machine open over Remote-SSH, so you edit them as if they were local.</p>
+      </div>
+      <img src="confirm-existing.png" alt="Continuing an existing project, with a VS Code button">
+    </section>
+  </div>
+
+  <h2>Everything else in the panel</h2>
+  <img src="agents.png" alt="The agent list" style="max-width: 420px; width: 100%; display: block; margin: 18px 0 8px; border-radius: 12px">
+  <table class="keys">
+    <tr><td><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Space</kbd></td><td>Open or close the panel, on the agent list with the most urgent agent selected</td></tr>
+    <tr><td><kbd>j</kbd> <kbd>k</kbd></td><td>Move up and down (arrows work too)</td></tr>
+    <tr><td><kbd>Enter</kbd></td><td>Jump to that agent's terminal</td></tr>
+    <tr><td><kbd>/</kbd></td><td>Search agents by name, machine, or words from their conversation</td></tr>
+    <tr><td><kbd>n</kbd></td><td>Start or continue a project (the flow above)</td></tr>
+    <tr><td><kbd>Tab</kbd></td><td>Switch to the inbox: agents waiting on you or just finished</td></tr>
+    <tr><td><kbd>r</kbd></td><td>Reply to an agent without leaving the panel</td></tr>
+    <tr><td><kbd>1</kbd>–<kbd>9</kbd></td><td>Answer an agent's question</td></tr>
+    <tr><td><kbd>o</kbd></td><td>Open the selected agent's folder in VS Code</td></tr>
+    <tr><td><kbd>Esc</kbd></td><td>Back, or close</td></tr>
+  </table>
+
+  <div class="cards">
+    <div class="card"><h3>Background sessions</h3><p>Claude sessions started with <code>claude --bg</code> (or by tools like trident) run outside tmux. They show up marked <i>background</i>; opening one runs <code>claude attach</code> in a window so you can answer it like any other.</p></div>
+    <div class="card"><h3>On your phone</h3><p>This server's main page is the same panel. The <b>⋯</b> menu has <i>Start or continue a project</i>, with a Start button instead of <kbd>Enter</kbd>.</p></div>
+    <div class="card"><h3>No flicker</h3><p>openone streams what each pane prints instead of re-reading screens, so your terminal never flashes. Each pane is read once when it first appears.</p></div>
+  </div>
+
+  <h2>Setup</h2>
+  <p>Each host in the config can say where its projects live, and how VS Code reaches it if that differs from its ssh address. Agent commands can be changed too.</p>
+<pre>{
+  "hosts": [
+    { "name": "desktop", "type": "psmux", "workspace": "D:\\Code" },
+    { "name": "linux-box", "type": "ssh", "ssh": "me@linux-box", "workspace": "~/Code", "vscode": "linux-box" }
+  ],
+  "agents": {
+    "claude": { "start": "claude", "resume": "claude --continue" },
+    "codex": { "start": "codex", "resume": "codex resume --last" }
+  }
+}</pre>
+
+  <h2>Good to know</h2>
+  <ul>
+    <li>Matching is by words, not meaning: "google drive photos" finds a README that says "Google Drive photos folder", but "cloud backup for pictures" won't. A project with no README is matched by its folder name only.</li>
+    <li>Project descriptions are cached for 10 minutes, so a README you just wrote may take a moment to count.</li>
+    <li>Codex can't take a message when resuming, so <i>continue</i> with codex opens the last chat and you type it there.</li>
+  </ul>
+
+  <footer>openone · <a href="../">open the panel</a></footer>
+</main>
+</body>
+</html>

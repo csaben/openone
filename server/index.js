@@ -108,7 +108,7 @@ function readJson(req, limit = 1e6) {
   });
 }
 
-const TYPES = { '.css': 'text/css', '.js': 'text/javascript', '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json' };
+const TYPES = { '.css': 'text/css', '.js': 'text/javascript', '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json', '.html': 'text/html; charset=utf-8' };
 const STATIC = {
   '/style.css': path.join(ROOT, 'src', 'ui', 'style.css'),
   '/app.js': path.join(ROOT, 'src', 'ui', 'app.js'),
@@ -254,6 +254,10 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/') return send(res, 200, indexHtml(), 'text/html; charset=utf-8');
     let file = STATIC[url.pathname];
     if (!file && /^\/assets\/[\w.-]+$/.test(url.pathname)) file = path.join(ROOT, url.pathname);
+    // the how-it-works page and its screenshots
+    if (url.pathname === '/guide') { res.writeHead(301, { location: 'guide/' }); return res.end(); }
+    if (!file && url.pathname === '/guide/') file = path.join(__dirname, 'web', 'guide', 'index.html');
+    if (!file && /^\/guide\/[\w-]+\.png$/.test(url.pathname)) file = path.join(__dirname, 'web', url.pathname);
     if (file && fs.existsSync(file)) return send(res, 200, fs.readFileSync(file), TYPES[path.extname(file)] || 'application/octet-stream');
     return send(res, 404, 'not found', 'text/plain');
   } catch (e) {

@@ -159,7 +159,7 @@ function agentsCard() {
   const n = inbox().length;
   const hint = query !== null
     ? `<kbd>↑</kbd><kbd>↓</kbd> pick · <kbd>Enter</kbd> ${OPEN_HINT} · <kbd>Esc</kbd> clear`
-    : `<kbd>j</kbd><kbd>k</kbd> pick · <kbd>Enter</kbd> ${OPEN_HINT} · <kbd>/</kbd> search · <kbd>n</kbd> project${n ? ` · <kbd>Tab</kbd> inbox (${n})` : ''}`;
+    : `<kbd>j</kbd><kbd>k</kbd> pick · <kbd>Enter</kbd> open · <kbd>/</kbd> search · <kbd>n</kbd> project${n ? ` · <kbd>Tab</kbd> inbox` : ''}`;
   return { html, hint };
 }
 
@@ -308,7 +308,7 @@ function projectCard() {
       section = r.section;
       return h + rowHtml(r, i);
     }).join('') + errs || '<div class="empty">Describe what you want to work on</div>';
-    const html = `${head('What are you working on?')}<div class="search"><input id="pq" placeholder="e.g. google drive cleanup for my photos (add inari/cradle to pick)" spellcheck="false" autocomplete="off" value="${esc(proj.q)}"></div>${verdict}${list}`;
+    const html = `${head('What are you working on?')}<div class="search"><input id="pq" placeholder="e.g. google drive cleanup for my photos${(proj.list || []).length > 1 ? ` (say ${esc(proj.list.map((x) => x.host).join(' or '))} to pick)` : ''}" spellcheck="false" autocomplete="off" value="${esc(proj.q)}"></div>${verdict}${list}`;
     return { html, hint: `<kbd>↑</kbd><kbd>↓</kbd> pick · <kbd>Enter</kbd> choose · <kbd>Esc</kbd> back` };
   }
   const p = proj.pick;
