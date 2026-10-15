@@ -5,6 +5,7 @@
 // `claude attach <id>` in a tmux window named bg-<id>, which then stands in for the row.
 
 const { Terminal } = require('@xterm/headless');
+const { detect } = require('./detect');
 
 const ID = /^[0-9a-f]{6,40}$/i;
 
@@ -21,9 +22,10 @@ function parseAgents(out) {
     .map((a) => ({ id: String(a.id), cwd: String(a.cwd || ''), name: String(a.name || ''), status: String(a.status || ''), state: String(a.state || '') }));
 }
 
-// Claude's status -> openone's: blocked means it's waiting on you
-function stateOf(a) {
-  if (a.state === 'blocked') return 'input';
+// Claude's status -> openone's. "blocked" means it's waiting on you, which is usually
+// just the empty prompt after a turn (idle); it's a question only if the screen shows one.
+function stateOf(a, screen = '') {
+  if (a.state === 'blocked') return detect(screen, { command: 'claude' }).state === 'input' ? 'input' : 'idle';
   if (a.status === 'busy') return 'working';
   return 'idle';
 }
@@ -70,14 +72,15 @@ class Background {
     const out = [];
     for (const a of this.list) {
       if (attached.has(`bg-${a.id}`)) continue; // open in a window: that pane is the row now
-      const state = stateOf(a);
+      const key = `${a.status}/${a.state}`;
       let t = this.texts.get(a.id);
-      if (!t || t.state !== state || Date.now() - t.at > this.textMs) {
+      if (!t || t.key !== key || Date.now() - t.at > this.textMs) {
         let text = t ? t.text : '';
         try { text = await screenText(await this.src.claudeLogs(a.id)); } catch {}
-        t = { text, state, at: Date.now() };
+        t = { text, key, at: Date.now() };
         this.texts.set(a.id, t);
       }
+      const state = stateOf(a, t.text);
       out.push({
         paneId: `bg:${a.id}`, session: 'bg', windowIndex: '', windowName: '', paneIndex: '0', command: 'claude',
         path: a.cwd, title: a.name, windowActive: '0', paneActive: '0', attached: false, sig: '', text: t.text,

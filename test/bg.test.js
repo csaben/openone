@@ -17,7 +17,9 @@ test('bg: only background sessions with safe ids are listed', () => {
 });
 
 test('bg: Claude status maps to openone state', () => {
-  assert.equal(stateOf({ status: 'busy', state: 'blocked' }), 'input');
+  // "blocked" is usually just the empty prompt after a turn
+  assert.equal(stateOf({ status: 'busy', state: 'blocked' }, '✻ Worked for 3s\n❯ '), 'idle');
+  assert.equal(stateOf({ status: 'busy', state: 'blocked' }, 'Do you want to proceed?\n❯ 1. Yes\n  2. No\n\nEsc to cancel'), 'input');
   assert.equal(stateOf({ status: 'busy' }), 'working');
   assert.equal(stateOf({ status: 'idle' }), 'idle');
 });
@@ -31,7 +33,7 @@ test('bg: rows stand in for panes, and hide once opened in a bg-<id> window', as
   const src = { claudeAgents: async () => LIST, claudeLogs: async () => 'screen' };
   const bg = new Background(src);
   const rows = await bg.rows([]);
-  assert.deepEqual(rows.map((r) => [r.paneId, r.override.state, r.title]), [['bg:c9b4a42b', 'input', 'README.md setup'], ['bg:abcdef12', 'working', 'tests']]);
+  assert.deepEqual(rows.map((r) => [r.paneId, r.override.state, r.title]), [['bg:c9b4a42b', 'idle', 'README.md setup'], ['bg:abcdef12', 'working', 'tests']]);
   const after = await bg.rows([{ windowName: 'bg-c9b4a42b' }]);
   assert.deepEqual(after.map((r) => r.bg), ['abcdef12']);
 });
