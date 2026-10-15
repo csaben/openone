@@ -7,6 +7,7 @@ const LIST = JSON.stringify([
   { pid: 2, cwd: '/home/u/Code/y', kind: 'interactive', name: 'y-1', status: 'idle' },
   { pid: 3, id: 'abcdef12', cwd: '/home/u/Code/z', kind: 'background', name: 'tests', status: 'busy' },
   { pid: 4, id: '; rm -rf ~', cwd: '/', kind: 'background', status: 'idle' },
+  { id: '2815dc19', cwd: '/old', kind: 'background', state: 'blocked' },
 ]);
 
 test('bg: only background sessions with safe ids are listed', () => {

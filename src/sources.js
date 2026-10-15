@@ -299,10 +299,16 @@ class LocalSource extends TmuxSource {
 
   controlSpawn(session) { return spawn(this.bin, ['-C', 'attach', '-t', session], { windowsHide: true }); }
 
+  // services (systemd, login items) often lack ~/.local/bin, where claude installs itself
   claude(args) {
-    return new Promise((resolve, reject) => {
-      execFile(this.cfg.claude || 'claude', args, { windowsHide: true, maxBuffer: 16 << 20, timeout: 15000, encoding: 'utf8' },
+    const run = (bin) => new Promise((resolve, reject) => {
+      execFile(bin, args, { windowsHide: true, maxBuffer: 16 << 20, timeout: 15000, encoding: 'utf8' },
         (err, out) => (err && !out ? reject(err) : resolve(out)));
+    });
+    if (this.cfg.claude) return run(this.cfg.claude);
+    return run('claude').catch((e) => {
+      if (e.code !== 'ENOENT') throw e;
+      return run(require('path').join(require('os').homedir(), '.local', 'bin', process.platform === 'win32' ? 'claude.exe' : 'claude'));
     });
   }
 

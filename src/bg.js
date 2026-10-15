@@ -16,7 +16,8 @@ function parseAgents(out) {
   let list;
   try { list = JSON.parse(s.slice(at, s.lastIndexOf(']') + 1)); } catch { return []; }
   return (Array.isArray(list) ? list : [])
-    .filter((a) => a && a.kind === 'background' && ID.test(String(a.id || '')))
+    // a record without a pid or status is a session that's gone (Claude keeps some around)
+    .filter((a) => a && a.kind === 'background' && ID.test(String(a.id || '')) && a.pid && a.status)
     .map((a) => ({ id: String(a.id), cwd: String(a.cwd || ''), name: String(a.name || ''), status: String(a.status || ''), state: String(a.state || '') }));
 }
 
