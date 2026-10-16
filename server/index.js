@@ -18,6 +18,7 @@ const { Bus, names } = require('../src/bus');
 const { Asks, view: askView } = require('../src/asks');
 const { Sleepers, sleepAgent, wakeAgent } = require('../src/sleep');
 const { Suggester, runCodex, buildPrompt, msUntil } = require('../src/suggest');
+const { Drops } = require('../src/drops');
 
 
 const ROOT = path.join(__dirname, '..');
@@ -58,6 +59,9 @@ const asks = new Asks({
 });
 // agents put to sleep: exited, with what it takes to resume them
 const sleepers = new Sleepers({ file: cfg.sleepFile || path.join(require('os').homedir(), '.local', 'state', 'openone', 'sleeping.json') });
+// links, text and files between the phone and the computers (src/drops.js)
+const drops = new Drops({ dir: path.join(require('os').homedir(), '.local', 'state', 'openone', 'drops'), onChange: () => pushState() });
+setInterval(() => drops.sweep(), 3600000);
 const polled = new Map(); // ask id -> last time someone long-polled it
 setInterval(() => asks.sweep(), 15000);
 const clients = new Set();
@@ -71,6 +75,8 @@ function state() {
     messages: bus.recent(40),
     asks: asks.pending().map(askView),
     sleeping: sleepers.list,
+    drops: drops.for('phone'), // the phone app reads these off the event stream
+    devices: drops.devices(),
     hosts: Object.values(hosts).map((h) => ({ name: h.cfg.name, type: h.cfg.type, ok: h.ok, error: h.error, fed: !!fedRecently(h) })),
   };
 }
@@ -281,6 +287,7 @@ async function api(req, res, parts) {
     }
     if (m === 'DELETE' && !c) { sleepers.take(id); pushState(); return send(res, 200, { ok: true }); }
   }
+  if (a === 'drops' || (m === 'GET' && a === 'devices')) return dropsApi(req, res, a, b ? decodeURIComponent(b) : '', c);
   if (m === 'GET' && a === 'app') return send(res, 200, await latestApp());
   if (a === 'suggest' && !b) {
     if (m === 'GET') return send(res, 200, { ...suggester.status(), active: await activeProjects().catch(() => []) });
@@ -408,6 +415,48 @@ async function busApi(req, res, what) {
     req.on('close', () => { clearInterval(beat); off(); });
     return;
   }
+  return send(res, 404, { error: 'not found' });
+}
+
+// ---------- drops ----------
+//
+//   GET    /api/devices                         where you can send things: computers seen lately, "phone"
+//   POST   /api/drops        { to, from, text } a link or text
+//   POST   /api/drops/file?to=&from=&name=      a file: the request body is its bytes
+//   GET    /api/drops?for=<device>&wait=25      what's waiting there (a computer asking marks it online)
+//   GET    /api/drops/:id/file                  a file's bytes
+//   DELETE /api/drops/:id                       got it: delete it
+
+async function dropsApi(req, res, a, id, action) {
+  const m = req.method;
+  const q = new URL(req.url, 'http://x').searchParams;
+  if (a === 'devices') return send(res, 200, drops.devices());
+  if (!id && m === 'GET') {
+    let list = drops.for(q.get('for'));
+    const wait = Math.min(Number(q.get('wait')) || 0, 55);
+    if (!list.length && wait) { await drops.wait(wait * 1000); list = drops.for(q.get('for')); }
+    return send(res, 200, list);
+  }
+  if (!id && m === 'POST') {
+    const body = await readJson(req, 2e5);
+    try { return send(res, 201, drops.add(body)); } catch (e) { return send(res, 400, { error: e.message }); }
+  }
+  if (id === 'file' && m === 'POST') {
+    try {
+      const d = await drops.addFile({ to: q.get('to'), from: q.get('from'), name: q.get('name'), mime: req.headers['content-type'], stream: req });
+      return send(res, 201, d);
+    } catch (e) { return send(res, 400, { error: e.message }); }
+  }
+  const d = drops.get(id);
+  if (!d) return send(res, 404, { error: 'no such drop (already received, or older than a day)' });
+  if (m === 'GET' && action === 'file' && d.kind === 'file') {
+    res.writeHead(200, {
+      'content-type': d.mime, 'content-length': d.size, 'cache-control': 'no-store',
+      'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(d.name)}`,
+    });
+    return fs.createReadStream(drops.filePath(d)).pipe(res);
+  }
+  if (m === 'DELETE' && !action) { drops.take(id); return send(res, 200, { ok: true }); }
   return send(res, 404, { error: 'not found' });
 }
 

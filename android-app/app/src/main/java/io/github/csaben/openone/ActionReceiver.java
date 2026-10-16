@@ -4,10 +4,15 @@ import android.app.Notification;
 import android.app.NotificationManager;
 import android.app.RemoteInput;
 import android.content.BroadcastReceiver;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.widget.Toast;
 
 import org.json.JSONObject;
 
@@ -54,6 +59,12 @@ public class ActionReceiver extends BroadcastReceiver {
                 CharSequence text = in == null ? null : in.getCharSequence(REPLY);
                 if (text == null || text.toString().trim().isEmpty()) return;
                 Api.post(c, "/api/panes/" + key + "/reply", new JSONObject().put("text", text.toString()));
+                break;
+            }
+            case "copy": {
+                ClipboardManager cm = c.getSystemService(ClipboardManager.class);
+                cm.setPrimaryClip(ClipData.newPlainText("openone", i.getStringExtra("text")));
+                new Handler(Looper.getMainLooper()).post(() -> Toast.makeText(c, "Copied", Toast.LENGTH_SHORT).show());
                 break;
             }
             default:

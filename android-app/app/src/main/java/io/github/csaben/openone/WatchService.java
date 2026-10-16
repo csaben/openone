@@ -184,8 +184,17 @@ public class WatchService extends Service {
         }
     }
 
+    /** drops already being received, so a state update mid-download doesn't start it twice */
+    private final Set<String> dropsTaken = new HashSet<>();
+
     private synchronized void apply(JSONObject s) {
         checkUpdate(); // throttled; a long-lived connection still notices new builds
+        JSONArray drops = s.optJSONArray("drops");
+        for (int i = 0; drops != null && i < drops.length(); i++) {
+            JSONObject d = drops.optJSONObject(i);
+            if (d == null || !dropsTaken.add(d.optString("id"))) continue;
+            new Thread(() -> Drops.receive(this, d), "openone-drop").start();
+        }
         Set<String> want = new HashSet<>();
         boolean quiet = first; // what was already waiting when we connected: post it, but silently
         first = false;

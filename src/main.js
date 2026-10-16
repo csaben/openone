@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, screen, powerMonitor, globalShortcut, Notification, Tray, Menu, nativeImage, nativeTheme, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, screen, powerMonitor, globalShortcut, Notification, Tray, Menu, nativeImage, nativeTheme, shell, clipboard } = require('electron');
 const { execFileSync, spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
@@ -326,6 +326,10 @@ function menuTemplate() {
   return [
     { label: cfg.hotkey ? `Open panel  (${cfg.hotkey.replace('Control', 'Ctrl')})` : 'Open panel', click: toggle },
     { type: 'separator' },
+    ...(cfg.server ? [
+      { label: 'Send clipboard to phone', click: () => sendClipboard().catch((e) => note("Couldn't send", e.message)) },
+      { type: 'separator' },
+    ] : []),
     { label: 'Show shells too', type: 'checkbox', checked: !!cfg.showShells, click: () => { cfg.showShells = !cfg.showShells; push(); } },
     { label: 'Mute notifications', type: 'checkbox', checked: muted, click: () => { muted = !muted; push(); } },
     { label: 'Reload config', click: () => { loadConfig(); place(); startHosts(); } },
@@ -359,6 +363,9 @@ function toggle() {
 app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
 
 if (!app.requestSingleInstanceLock()) app.quit();
+// Explorer's "Send to > openone (phone)" starts openone.exe --send-to-phone <files>; when
+// it's already running, that arrives here
+app.on('second-instance', (_e, argv) => sendFilesFromArgs(argv));
 
 app.whenReady().then(() => {
   app.setAppUserModelId('com.csaben.openone');
@@ -410,7 +417,7 @@ app.whenReady().then(() => {
     push();
   });
   ipcMain.on('pane:seen', (_e, key) => { monitor.markSeen(key); push(); tellServer(key); });
-  if (cfg.server) pollMessages();
+  if (cfg.server) { pollMessages(); pollDrops(); sendToShortcut(); sendFilesFromArgs(process.argv); }
 });
 
 // "server": "https://..." — the openone server that carries messages between agents.
@@ -431,6 +438,100 @@ async function pollMessages() {
 function tellServer(key) {
   if (!cfg.server || !key) return;
   fetch(`${serverUrl()}/api/panes/${encodeURIComponent(key)}/seen`, { method: 'POST', signal: AbortSignal.timeout(8000) }).catch(() => {});
+}
+
+// ---------- drops: links, text and files between the phone and this computer ----------
+//
+// Whatever the phone shares here: links open in the browser, text goes on the clipboard,
+// files land in Downloads. The other way: the tray's "Send clipboard to phone", and
+// Explorer's Send to menu for files.
+
+const dropName = () => String(cfg.dropName || require('os').hostname()).toLowerCase();
+
+function note(title, body, click) {
+  const n = new Notification({ title, body: String(body || '').slice(0, 200), silent: true, icon: toastIcon() });
+  if (click) n.on('click', click);
+  n.show();
+}
+
+async function pollDrops() {
+  for (;;) {
+    try {
+      const r = await fetch(`${serverUrl()}/api/drops?for=${encodeURIComponent(dropName())}&wait=25`, { signal: AbortSignal.timeout(40000) });
+      if (r.ok) for (const d of await r.json()) await receiveDrop(d).catch((e) => note("Couldn't receive", e.message));
+      else await sleep(5000);
+    } catch { await sleep(5000); }
+  }
+}
+
+async function receiveDrop(d) {
+  const from = d.from === 'phone' ? 'your phone' : d.from;
+  if (d.kind === 'text') {
+    clipboard.writeText(d.text);
+    for (const u of d.links || []) await shell.openExternal(u);
+    note(d.links && d.links.length ? `Opened ${d.links.length === 1 ? 'a link' : `${d.links.length} links`} from ${from}` : `Copied text from ${from}`,
+      d.links && d.links.length ? d.links.join('\n') : d.text);
+  } else {
+    const r = await fetch(`${serverUrl()}/api/drops/${encodeURIComponent(d.id)}/file`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const file = freeName(path.join(app.getPath('downloads'), d.name));
+    fs.writeFileSync(file, Buffer.from(await r.arrayBuffer()));
+    note(`Saved ${path.basename(file)} from ${from}`, 'In Downloads. Click to show it.', () => shell.showItemInFolder(file));
+  }
+  await fetch(`${serverUrl()}/api/drops/${encodeURIComponent(d.id)}`, { method: 'DELETE' });
+}
+
+// "report.pdf" -> "report (2).pdf" when it's taken
+function freeName(file) {
+  if (!fs.existsSync(file)) return file;
+  const ext = path.extname(file);
+  const stem = file.slice(0, file.length - ext.length);
+  for (let i = 2; ; i++) if (!fs.existsSync(`${stem} (${i})${ext}`)) return `${stem} (${i})${ext}`;
+}
+
+async function sendText(text) {
+  const r = await fetch(`${serverUrl()}/api/drops`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ to: 'phone', from: dropName(), text }),
+  });
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`);
+}
+
+async function sendFile(file, name = path.basename(file), data = null) {
+  const body = data || fs.readFileSync(file);
+  const r = await fetch(`${serverUrl()}/api/drops/file?to=phone&from=${encodeURIComponent(dropName())}&name=${encodeURIComponent(name)}`, {
+    method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body,
+  });
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`);
+}
+
+// text, or an image (a screenshot), whichever the clipboard has
+async function sendClipboard() {
+  const img = clipboard.readImage();
+  const text = clipboard.readText();
+  if (text.trim()) { await sendText(text); note('Sent to your phone', text); return; }
+  if (!img.isEmpty()) { await sendFile(null, `clipboard-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.png`, img.toPNG()); note('Sent the image to your phone', ''); return; }
+  note('Nothing to send', 'The clipboard is empty.');
+}
+
+async function sendFilesFromArgs(argv) {
+  const i = argv.indexOf('--send-to-phone');
+  if (i < 0 || !cfg || !cfg.server) return;
+  const files = argv.slice(i + 1).filter((f) => { try { return fs.statSync(f).isFile(); } catch { return false; } });
+  for (const f of files) {
+    try { await sendFile(f); } catch (e) { note(`Couldn't send ${path.basename(f)}`, e.message); return; }
+  }
+  if (files.length) note(`Sent ${files.length === 1 ? path.basename(files[0]) : `${files.length} files`} to your phone`, '');
+}
+
+// Explorer's right-click > Send to > openone (phone)
+function sendToShortcut() {
+  if (!app.isPackaged || process.platform !== 'win32') return;
+  try {
+    const link = path.join(app.getPath('appData'), 'Microsoft', 'Windows', 'SendTo', 'openone (phone).lnk');
+    shell.writeShortcutLink(link, fs.existsSync(link) ? 'update' : 'create', {
+      target: process.execPath, args: '--send-to-phone', description: 'Send to your phone with openone', icon: process.execPath, iconIndex: 0,
+    });
+  } catch {}
 }
 
 app.on('will-quit', () => {

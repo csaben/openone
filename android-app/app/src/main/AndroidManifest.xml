@@ -41,6 +41,25 @@
                 android:value="Self-hosted notifications: a live connection to the user's own openone server over their private network, instead of a push service" />
         </service>
 
+        <!-- "openone" in the share sheet: send links, text and files to a computer -->
+        <activity
+            android:name=".ShareActivity"
+            android:exported="true"
+            android:label="openone"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+        </activity>
+
         <receiver android:name=".ActionReceiver" android:exported="false" />
         <receiver android:name=".Updater$Status" android:exported="false" />
 

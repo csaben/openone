@@ -32,6 +32,23 @@ final class Api {
         return read(open(c, path));
     }
 
+    /** The raw body, for answers that aren't an object (a JSON array). */
+    static String getText(Context c, String path) throws IOException {
+        HttpURLConnection conn = open(c, path);
+        int code = conn.getResponseCode();
+        if (code >= 400) throw new IOException("HTTP " + code);
+        String text = slurp(conn.getInputStream());
+        conn.disconnect();
+        return text;
+    }
+
+    static void delete(Context c, String path) throws IOException {
+        HttpURLConnection conn = open(c, path);
+        conn.setRequestMethod("DELETE");
+        conn.getResponseCode();
+        conn.disconnect();
+    }
+
     static HttpURLConnection open(Context c, String path) throws IOException {
         String base = Prefs.url(c);
         if (base.isEmpty()) throw new IOException("no server set");
