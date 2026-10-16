@@ -15,6 +15,7 @@ let peekKey = null;
 let peekTimer = null;
 let hintTimer = null;
 let query = null; // the agent list's "/" search: null when closed
+let tidy = null; // "Tidy up": the set of agent keys picked to put to sleep, or null
 const drafts = {};
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -166,11 +167,47 @@ function askCard(a, items, pager) {
   return { html, hint };
 }
 
+// one at a time: each waits for its agent to print how to resume it
+async function sleepAgents(keys) {
+  for (const key of keys) {
+    const p = find(key);
+    toast(`Putting ${p ? p.label : 'it'} to sleep…`);
+    try { await window.oo.sleep(key); } catch (err) { toast(`${p ? p.label : 'It'}: ${err.message}`); return; }
+  }
+  toast(keys.length > 1 ? `${keys.length} agents asleep` : 'Asleep. Wake it from the Sleeping list.');
+}
+
+async function wake(id) {
+  const r = (S.sleeping || []).find((x) => x.id === id);
+  toast(`Waking ${r ? r.label : 'it'}…`);
+  try { const key = await window.oo.wake(id); if (WEB && key) window.oo.jump(key); } catch (err) { toast(err.message); }
+}
+
 function answerAsk(id, opt) {
   const el = body.querySelector(`.opt[data-opt="${CSS.escape(opt)}"]`);
   if (el) el.classList.add('kb');
   window.oo.answerAsk(id, opt).catch((err) => toast(err.message));
   setTimeout(() => { S.asks = (S.asks || []).filter((a) => a.id !== id); render(); }, 140);
+}
+
+// idle agents can be put to sleep (exited, resumable later); not ones waiting or working
+const canSleep = (p) => !!window.oo.sleep && !!p.kind && !p.bg && p.state === 'idle';
+const MOON = '<svg viewBox="0 0 16 16"><path d="M12.8 10.2A5.2 5.2 0 0 1 5.8 3.2a5.2 5.2 0 1 0 7 7Z"/></svg>';
+
+// what tidy mode picks to start with: idle and untouched for an hour, already read
+function tidyDefaults() {
+  return new Set(S.panes.filter((p) => canSleep(p) && !p.unseen && Date.now() - lastUsed(p) > 3600000).map((p) => p.key));
+}
+
+function sleepingList() {
+  const list = S.sleeping || [];
+  if (!list.length) return '';
+  const rows = list.slice().sort((a, b) => b.sleptAt - a.sleptAt).map((r) => `<div class="row sleeping">
+      <span class="st sleep"></span>
+      <div class="mid"><div class="t1"><span class="nm">${esc(r.label)}</span><span class="kind">${esc(r.kind)} · ${esc(r.host)}</span></div>
+      <div class="t2">${esc(r.title || r.summary || r.path)}</div></div>
+      <button class="pill" data-wake="${esc(r.id)}">Wake</button><button class="icon" data-forget="${esc(r.id)}" title="Forget it">${X}</button></div>`).join('');
+  return `<div class="host"><span class="dot sleep"></span>Sleeping<span class="count">${list.length}</span></div>${rows}`;
 }
 
 function agentsCard() {
@@ -184,11 +221,14 @@ function agentsCard() {
   let i = 0;
   const row = (p, showHost) => {
     const line = status(p) === 'input' ? (p.question || 'Waiting for your answer') : (p.title || p.summary || subline(p));
-    return `<div class="row ${p.kind ? '' : 'shell'} ${i++ === kb ? 'kb' : ''}" data-jump="${esc(p.key)}">
+    const pick = tidy && canSleep(p);
+    const tail = pick ? `<span class="check ${tidy.has(p.key) ? 'on' : ''}"></span>`
+      : canSleep(p) && !tidy ? `<button class="icon zz" data-sleep="${esc(p.key)}" title="Put to sleep">${MOON}</button>` : '';
+    return `<div class="row ${p.kind ? '' : 'shell'} ${i++ === kb ? 'kb' : ''} ${tidy && !pick ? 'dim' : ''}" ${pick ? `data-pick="${esc(p.key)}"` : `data-jump="${esc(p.key)}"`}>
       <span class="st ${status(p)}"></span>
       <div class="mid"><div class="t1"><span class="nm">${esc(p.label)}</span><span class="kind">${esc(p.kind || 'shell')}${p.bg ? ' · background' : ''}${showHost ? ` · ${esc(p.host)}` : ''}</span></div>
       <div class="t2">${esc(line)}</div>${mailLine(p)}</div>
-      <span class="age">${esc(when(p))}</span></div>`;
+      <span class="age">${esc(when(p))}</span>${tail}</div>`;
   };
   let list;
   if (query !== null) {
@@ -201,9 +241,14 @@ function agentsCard() {
       const rows = panes.filter((p) => p.host === h.name).map((p) => row(p, false)).join('');
       const head = `<div class="host"><span class="dot ${h.ok ? '' : 'down'}"></span>${esc(h.name)}${h.ok ? '' : `<span class="err">${esc(h.error)}</span>`}</div>`;
       return head + (rows || (h.ok ? '<div class="empty">No panes</div>' : ''));
-    }).join('');
+    }).join('') + (tidy ? '' : sleepingList());
   }
-  const html = `<div class="head"><h1>Agents${parts.length ? ` <span style="color:var(--muted);font-weight:500;font-size:12.5px">· ${parts.join(' · ')}</span>` : ''}</h1><button class="x" data-close>${X}</button></div>${list}`;
+  const sleepable = S.panes.filter(canSleep).length;
+  const tools = tidy
+    ? `<button class="pill go" data-tidy-go ${tidy.size ? '' : 'disabled'}>Sleep ${tidy.size}</button><button class="pill" data-tidy-x>Cancel</button>`
+    : sleepable && query === null ? '<button class="pill" data-tidy title="Pick idle agents to put to sleep">Tidy up</button>' : '';
+  const html = `<div class="head"><h1>${tidy ? 'Put to sleep' : 'Agents'}${parts.length && !tidy ? ` <span style="color:var(--muted);font-weight:500;font-size:12.5px">· ${parts.join(' · ')}</span>` : ''}</h1>${tools}<button class="x" data-close>${X}</button></div>
+    ${tidy ? '<div class="note">Picked: idle for over an hour. Each exits and can be woken later in the same conversation.</div>' : ''}${list}`;
   const n = inbox().length;
   const hint = query !== null
     ? `<kbd>↑</kbd><kbd>↓</kbd> pick · <kbd>Enter</kbd> ${OPEN_HINT} · <kbd>Esc</kbd> clear`
@@ -573,6 +618,7 @@ function collapse() {
   if (!expanded || WEB) return;
   expanded = false;
   query = null;
+  tidy = null;
   if (proj) { proj = null; view = 'agents'; }
   root.classList.replace('expanded', 'collapsed');
   showHint(false);
@@ -686,8 +732,15 @@ $('#b-term').addEventListener('click', () => {
 });
 
 body.addEventListener('click', (e) => {
-  const t = e.target.closest('[data-close],[data-jump],[data-n],[data-send],[data-cur],[data-proj],[data-row],[data-start],[data-code],[data-ask]');
+  const t = e.target.closest('[data-close],[data-jump],[data-n],[data-send],[data-cur],[data-proj],[data-row],[data-start],[data-code],[data-ask],[data-sleep],[data-wake],[data-forget],[data-pick],[data-tidy],[data-tidy-go],[data-tidy-x]');
   if (!t) return;
+  if (t.dataset.sleep) { e.stopPropagation(); sleepAgents([t.dataset.sleep]); return; }
+  if (t.dataset.wake) { wake(t.dataset.wake); return; }
+  if (t.dataset.forget) { window.oo.forgetSleeping(t.dataset.forget).catch((err) => toast(err.message)); return; }
+  if (t.dataset.pick) { if (tidy.has(t.dataset.pick)) tidy.delete(t.dataset.pick); else tidy.add(t.dataset.pick); render(); return; }
+  if (t.dataset.tidy !== undefined) { tidy = tidyDefaults(); kb = -1; render(); return; }
+  if (t.dataset.tidyX !== undefined) { tidy = null; render(); return; }
+  if (t.dataset.tidyGo !== undefined) { const keys = [...tidy]; tidy = null; sleepAgents(keys); return; }
   if (t.dataset.ask) { answerAsk(t.dataset.ask, t.dataset.opt); return; }
   if (t.dataset.start !== undefined) { launch(); return; }
   if (t.dataset.code !== undefined) { window.oo.code({ host: proj.pick.host, folder: proj.pick.name }).catch((err) => toast(err.message)); return; }
@@ -746,6 +799,7 @@ document.addEventListener('keydown', (e) => {
   const typing = e.target.tagName === 'INPUT';
   if (e.target.id === 'q') return searchKey(e);
   if (view === 'project' && proj) return projectKey(e);
+  if (e.key === 'Escape' && tidy) { tidy = null; render(); return; }
   if (e.key === 'Escape' && query !== null && !typing) { closeSearch(); return; }
   if (e.key === 'Escape') { if (typing) e.target.blur(); else collapse(); return; }
   if (typing) { if (e.key === 'Enter' && e.target.id === 'reply') sendReply(); return; }

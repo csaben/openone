@@ -16,6 +16,7 @@ const projects = require('../src/projects');
 const { Embedder, semantic, projectText } = require('../src/embed');
 const { Bus, names } = require('../src/bus');
 const { Asks, view: askView } = require('../src/asks');
+const { Sleepers, sleepAgent, wakeAgent } = require('../src/sleep');
 
 
 const ROOT = path.join(__dirname, '..');
@@ -53,6 +54,8 @@ const asks = new Asks({
     try { bus.send({ fromName: 'openone', to: a.fromKey, content: text, note: true }); pushState(); } catch {}
   },
 });
+// agents put to sleep: exited, with what it takes to resume them
+const sleepers = new Sleepers({ file: cfg.sleepFile || path.join(require('os').homedir(), '.local', 'state', 'openone', 'sleeping.json') });
 const polled = new Map(); // ask id -> last time someone long-polled it
 setInterval(() => asks.sweep(), 15000);
 const clients = new Set();
@@ -65,6 +68,7 @@ function state() {
     panes: monitor.view(),
     messages: bus.recent(40),
     asks: asks.pending().map(askView),
+    sleeping: sleepers.list,
     hosts: Object.values(hosts).map((h) => ({ name: h.cfg.name, type: h.cfg.type, ok: h.ok, error: h.error, fed: !!fedRecently(h) })),
   };
 }
@@ -239,6 +243,12 @@ async function api(req, res, parts) {
         await h.src.keys(p, keys);
       } else if (c === 'text') { await h.src.text(p, String(body.text || '')); }
       else if (c === 'seen') { monitor.markSeen(p.key); bus.touch(p.key); }
+      else if (c === 'sleep') {
+        const rec = sleepers.add(await sleepAgent(h, p));
+        await refresh(h).catch(() => {});
+        pushState();
+        return send(res, 200, rec);
+      }
       else if (c === 'focus') await h.src.focus(p.bg ? await h.src.attachBackground(p.bg) : p);
       else if (c === 'attach') {
         // background session -> a tmux window running `claude attach`; returns that pane's key
@@ -254,6 +264,21 @@ async function api(req, res, parts) {
   }
 
   if (a === 'bus') return busApi(req, res, b);
+  if (a === 'sleeping' && b) {
+    const id = decodeURIComponent(b);
+    if (m === 'POST' && c === 'wake') {
+      const r = sleepers.take(id);
+      const h = hosts[r.host];
+      if (!h) { sleepers.put(r); return send(res, 404, { error: `host ${r.host} isn't connected` }); }
+      try {
+        const np = await wakeAgent(h, cfg, r);
+        await refresh(h).catch(() => {});
+        pushState();
+        return send(res, 200, { key: `${h.cfg.name}|${np.session}|${np.paneId}` });
+      } catch (e) { sleepers.put(r); pushState(); throw e; }
+    }
+    if (m === 'DELETE' && !c) { sleepers.take(id); pushState(); return send(res, 200, { ok: true }); }
+  }
   if (a === 'asks') return asksApi(req, res, b ? decodeURIComponent(b) : '', c);
 
   if (m === 'POST' && a === 'hosts' && b && c === 'snapshot') {

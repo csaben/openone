@@ -113,6 +113,12 @@ env_vars = ["TMUX", "TMUX_PANE", "PSMUX_SESSION"]
 
 A message typed into a pane reads like a prompt from you, so any agent can steer any other. The tool tells agents to treat these as requests from a sibling, not from you, and every message is logged, but only use this between agents you'd let act on each other's behalf.
 
+### Sleep and wake
+
+Fewer agents lying around, none lost. In the web panel and the app, each idle agent has a moon button, and **Tidy up** picks every agent that's been idle for over an hour so you can put them all to sleep at once. Sleeping an agent types `/exit` (Codex: `/quit`), reads the resume command it prints on the way out, closes its window and lists it under **Sleeping**. **Wake** opens a window in the same folder with `claude --resume <id>` / `codex resume <id>`, built on your configured start command so its flags stay. Only idle agents can sleep, not ones working or waiting on you. The list is kept in `~/.local/state/openone/sleeping.json`.
+
+`POST /api/panes/:key/sleep` · `POST /api/sleeping/:id/wake` · `DELETE /api/sleeping/:id` (forget it)
+
 ### Questions for you (asks)
 
 Anything can put a question with up to four buttons in front of you: "Add Dentist Thu 3pm to your calendar? Add / Skip". It shows at the top of the panel's inbox, and you answer with one tap or a number key, without opening a chat.

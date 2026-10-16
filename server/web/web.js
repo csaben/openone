@@ -26,7 +26,7 @@
   function emitState() {
     fire('state', {
       panes: last.panes.filter((p) => showShells || p.state !== 'shell'),
-      hosts: last.hosts, showShells, muted, asks: last.asks || [], messages: last.messages || [],
+      hosts: last.hosts, showShells, muted, asks: last.asks || [], messages: last.messages || [], sleeping: last.sleeping || [],
     });
   }
 
@@ -290,6 +290,9 @@
     answer: (key, n) => call('POST', `api/panes/${enc(key)}/answer`, { n }).catch((e) => toast(e.message)),
     reply: (key, text) => call('POST', `api/panes/${enc(key)}/reply`, { text }).catch((e) => toast(e.message)),
     seen: (key) => call('POST', `api/panes/${enc(key)}/seen`).catch(() => {}),
+    sleep: (key) => call('POST', `api/panes/${enc(key)}/sleep`),
+    wake: async (id) => (await call('POST', `api/sleeping/${enc(id)}/wake`)).key,
+    forgetSleeping: (id) => call('DELETE', `api/sleeping/${enc(id)}`),
     answerAsk: (id, option) => call('POST', `api/asks/${enc(id)}/answer`, { option, by: 'web' }),
     projects: () => call('GET', 'api/projects'),
     semantic: (q) => call('GET', `api/projects/semantic?q=${enc(q)}`),
