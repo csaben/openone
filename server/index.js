@@ -19,6 +19,7 @@ const { Asks, view: askView } = require('../src/asks');
 const { Sleepers, sleepAgent, wakeAgent } = require('../src/sleep');
 const { Suggester, runCodex, buildPrompt, msUntil } = require('../src/suggest');
 const { Drops } = require('../src/drops');
+const { Board } = require('../src/board');
 
 
 const ROOT = path.join(__dirname, '..');
@@ -62,6 +63,9 @@ const sleepers = new Sleepers({ file: cfg.sleepFile || path.join(require('os').h
 // links, text and files between the phone and the computers (src/drops.js)
 const drops = new Drops({ dir: path.join(require('os').homedir(), '.local', 'state', 'openone', 'drops'), onChange: () => pushState() });
 setInterval(() => drops.sweep(), 3600000);
+// the shared whiteboard (src/board.js); pages hear "board" on the event stream when it changes
+const board = new Board({ dir: path.join(require('os').homedir(), '.local', 'state', 'openone', 'board'), onChange: (v) => broadcast('board', { version: v }) });
+let boardViewers = 0; // board pages connected right now
 const polled = new Map(); // ask id -> last time someone long-polled it
 setInterval(() => asks.sweep(), 15000);
 const clients = new Set();
@@ -227,8 +231,10 @@ async function api(req, res, parts) {
     res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' });
     res.write(`event: state\ndata: ${JSON.stringify(state())}\n\n`);
     clients.add(res);
+    const isBoard = new URL(req.url, 'http://x').searchParams.get('board') === '1';
+    if (isBoard) boardViewers++;
     const beat = setInterval(() => res.write(': ping\n\n'), 20000);
-    req.on('close', () => { clearInterval(beat); clients.delete(res); });
+    req.on('close', () => { clearInterval(beat); clients.delete(res); if (isBoard) boardViewers--; });
     return;
   }
 
@@ -287,6 +293,7 @@ async function api(req, res, parts) {
     }
     if (m === 'DELETE' && !c) { sleepers.take(id); pushState(); return send(res, 200, { ok: true }); }
   }
+  if (a === 'board') return boardApi(req, res, b, c);
   if (a === 'drops' || (m === 'GET' && a === 'devices')) return dropsApi(req, res, a, b ? decodeURIComponent(b) : '', c);
   if (m === 'GET' && a === 'app') return send(res, 200, await latestApp());
   if (a === 'suggest' && !b) {
@@ -415,6 +422,61 @@ async function busApi(req, res, what) {
     req.on('close', () => { clearInterval(beat); off(); });
     return;
   }
+  return send(res, 404, { error: 'not found' });
+}
+
+// ---------- whiteboard ----------
+//
+//   GET  /api/board                  { version, elements, files, ops }
+//   GET  /api/board/meta             { version, ops, viewers, snapshot }: cheap, for the desktop app
+//   POST /api/board/scene            { elements, files, done: [op ids], result } a page's edits
+//   POST /api/board/ops/:id/claim    a page takes an agent's drawing to render (only one gets it)
+//   POST /api/board/draw             { elements | mermaid, place, from, wait } an agent draws
+//   GET  /api/board/read             { summary, version, snapshot: { at, version, png (base64) } }
+//   GET  /api/board/snapshot.png     the latest picture of the board
+//   POST /api/board/snapshot?version=N  (body: PNG) a page's picture of the board
+//   POST /api/board/clear
+
+async function boardApi(req, res, what, id) {
+  const m = req.method;
+  const q = new URL(req.url, 'http://x').searchParams;
+  if (m === 'GET' && !what) return send(res, 200, board.scene());
+  if (m === 'GET' && what === 'meta') return send(res, 200, { version: board.version, ops: board.scene().ops.length, viewers: boardViewers, snapshot: board.snap });
+  if (m === 'POST' && what === 'scene') {
+    const body = await readJson(req, 80e6);
+    board.merge(body.elements, body.files);
+    if (Array.isArray(body.done) && body.done.length) board.finish(body.done, body.result || {});
+    return send(res, 200, { version: board.version });
+  }
+  if (m === 'POST' && what === 'ops' && id) return send(res, 200, { ok: board.claim(decodeURIComponent(id)) });
+  if (m === 'POST' && what === 'draw') {
+    const body = await readJson(req, 4e6);
+    let op;
+    try { op = board.addOp(body); } catch (e) { return send(res, 400, { error: e.message }); }
+    const wait = Math.min(Number(body.wait ?? 15), 55);
+    const r = await board.waitOp(op.id, wait * 1000);
+    return send(res, 200, { op: op.id, ...r, viewers: boardViewers });
+  }
+  if (m === 'GET' && what === 'read') {
+    const snap = board.snapshot();
+    return send(res, 200, {
+      version: board.version, summary: board.summary(),
+      snapshot: snap ? { at: snap.at, version: snap.version, current: snap.version >= board.version - 1, png: q.get('png') === '0' ? undefined : snap.png.toString('base64') } : null,
+    });
+  }
+  if (m === 'GET' && what === 'snapshot.png') {
+    const snap = board.snapshot();
+    if (!snap) return send(res, 404, { error: 'no picture yet: open the board once' });
+    return send(res, 200, snap.png, 'image/png');
+  }
+  if (m === 'POST' && what === 'snapshot') {
+    const chunks = [];
+    let size = 0;
+    for await (const c of req) { size += c.length; if (size > 20e6) return send(res, 413, { error: 'too big' }); chunks.push(c); }
+    board.setSnapshot(Buffer.concat(chunks), q.get('version'));
+    return send(res, 200, { ok: true });
+  }
+  if (m === 'POST' && what === 'clear') { board.clear(); return send(res, 200, { version: board.version }); }
   return send(res, 404, { error: 'not found' });
 }
 
@@ -618,6 +680,10 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/guide') { res.writeHead(301, { location: 'guide/' }); return res.end(); }
     if (!file && url.pathname === '/guide/') file = path.join(__dirname, 'web', 'guide', 'index.html');
     if (!file && /^\/guide\/[\w-]+\.png$/.test(url.pathname)) file = path.join(__dirname, 'web', url.pathname);
+    // the whiteboard page
+    if (url.pathname === '/board/') { res.writeHead(301, { location: '../board' }); return res.end(); } // its links are relative
+    if (!file && url.pathname === '/board') file = path.join(__dirname, 'web', 'board.html');
+    if (!file && url.pathname === '/board.js') file = path.join(__dirname, 'web', 'board.js');
     if (file && fs.existsSync(file)) return send(res, 200, fs.readFileSync(file), TYPES[path.extname(file)] || 'application/octet-stream');
     return send(res, 404, 'not found', 'text/plain');
   } catch (e) {

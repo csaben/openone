@@ -336,6 +336,7 @@ function menuTemplate() {
     { label: cfg.hotkey ? `Open panel  (${cfg.hotkey.replace('Control', 'Ctrl')})` : 'Open panel', click: toggle },
     { type: 'separator' },
     ...(cfg.server ? [
+      { label: cfg.boardHotkey ? `Whiteboard  (${cfg.boardHotkey.replace('Control', 'Ctrl')})` : 'Whiteboard', click: () => openBoard() },
       { label: 'Send clipboard to phone', click: () => sendClipboard().catch((e) => note("Couldn't send", e.message)) },
       { type: 'separator' },
     ] : []),
@@ -426,6 +427,7 @@ app.whenReady().then(() => {
     push();
   });
   ipcMain.on('pane:seen', (_e, key) => { monitor.markSeen(key); push(); tellServer(key); });
+  if (cfg.server && cfg.boardHotkey) { try { globalShortcut.register(cfg.boardHotkey, () => openBoard()); } catch {} }
   if (cfg.server) { pollMessages(); pollDrops(); sendToShortcut(); sendFilesFromArgs(process.argv); }
 });
 
@@ -438,6 +440,9 @@ async function pollMessages() {
     try {
       const r = await fetch(`${serverUrl()}/api/bus/messages?n=40`, { signal: AbortSignal.timeout(8000) });
       if (r.ok) { const m = await r.json(); if (JSON.stringify(m) !== JSON.stringify(messages)) { messages = m; push(); } }
+      // an agent drew on the whiteboard and no board is open anywhere: open it, so it draws
+      const bm = await fetch(`${serverUrl()}/api/board/meta`, { signal: AbortSignal.timeout(8000) }).then((x) => x.json()).catch(() => null);
+      if (bm && bm.ops > 0 && bm.viewers === 0 && (!boardWin || boardWin.isDestroyed())) openBoard(true);
       const q = await fetch(`${serverUrl()}/api/asks`, { signal: AbortSignal.timeout(8000) });
       if (q.ok) { const a = await q.json(); if (JSON.stringify(a) !== JSON.stringify(asks)) { asks = a; push(); } }
     } catch {}
@@ -447,6 +452,30 @@ async function pollMessages() {
 function tellServer(key) {
   if (!cfg.server || !key) return;
   fetch(`${serverUrl()}/api/panes/${encodeURIComponent(key)}/seen`, { method: 'POST', signal: AbortSignal.timeout(8000) }).catch(() => {});
+}
+
+// ---------- the whiteboard: the server's /board page in its own window ----------
+
+let boardWin = null;
+// quiet: an agent drew and nobody had it open; show it without taking the keyboard
+function openBoard(quiet = false) {
+  if (!cfg.server) return;
+  if (boardWin && !boardWin.isDestroyed()) {
+    if (boardWin.isMinimized()) boardWin.restore();
+    if (quiet) boardWin.showInactive(); else { boardWin.show(); boardWin.focus(); }
+    return;
+  }
+  const area = display().workArea;
+  boardWin = new BrowserWindow({
+    width: Math.round(area.width * 0.75), height: Math.round(area.height * 0.8), title: 'openone board', show: false,
+    backgroundColor: '#121212', autoHideMenuBar: true, icon: path.join(ASSETS, 'app-256.png'),
+    webPreferences: { contextIsolation: true, nodeIntegration: false },
+  });
+  boardWin.loadURL(`${serverUrl()}/board`);
+  boardWin.once('ready-to-show', () => { if (quiet) boardWin.showInactive(); else boardWin.show(); });
+  // links on the board open in the browser, not in this window
+  boardWin.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:/.test(url)) shell.openExternal(url); return { action: 'deny' }; });
+  boardWin.on('closed', () => { boardWin = null; });
 }
 
 // ---------- drops: links, text and files between the phone and this computer ----------

@@ -137,7 +137,8 @@ const INSTRUCTIONS = 'openone sees every Claude and Codex agent running in tmux/
   'Make each message self-contained: the receiver does not share your context. For long content, write a file and send its path. ' +
   'peek shows another agent\'s screen. projects and ls browse the project folders on each host; start launches a new agent in one, ' +
   'with an optional first message. ask puts a question with buttons on the user\'s phone (approve this, pick one) ' +
-  'and waits for the tap; use it instead of stopping to wait for the user when one quick decision unblocks you.';
+  'and waits for the tap; use it instead of stopping to wait for the user when one quick decision unblocks you. ' +
+  'board_read and board_draw share a whiteboard with the user: read it when they say they drew something for you, draw on it to sketch a diagram for them.';
 
 const TOOLS = [
   {
@@ -214,6 +215,37 @@ const TOOLS = [
   },
 ];
 
+TOOLS.push(
+  {
+    name: 'board_read',
+    description: 'Look at the shared whiteboard the user draws on (openone board). Returns a picture of it plus a text list of its shapes, text, arrows and where they are. Use it when the user says they drew or wrote something for you on the board.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'board_draw',
+    description: 'Draw on the shared whiteboard the user sees (openone board): diagrams, sketches, notes. Give either "mermaid" (a Mermaid flowchart/sequence diagram, turned into shapes) or "elements": Excalidraw element skeletons, e.g. ' +
+      '{"type":"rectangle","x":0,"y":0,"width":180,"height":70,"id":"a","label":{"text":"API"},"backgroundColor":"#a5d8ff"}, ' +
+      '{"type":"ellipse"|"diamond", ...same}, {"type":"text","x":0,"y":120,"text":"note","fontSize":20}, ' +
+      '{"type":"arrow","x":180,"y":35,"start":{"id":"a"},"end":{"id":"b"},"label":{"text":"calls"}} (start/end bind to element ids), ' +
+      '{"type":"line","x":0,"y":0,"points":[[0,0],[100,50]]}. Optional on shapes: strokeColor, fillStyle ("solid","hachure"), strokeWidth. ' +
+      'By default the drawing is placed beside what is already there (coordinates are relative to each other); place:"exact" uses your coordinates as board coordinates (to annotate something board_read showed). ' +
+      'It appears on the board right away when it is open; otherwise when they next open it.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        elements: { type: 'array', items: { type: 'object' }, description: 'Excalidraw element skeletons.' },
+        mermaid: { type: 'string', description: 'A Mermaid diagram, instead of elements.' },
+        place: { type: 'string', enum: ['auto', 'exact'], description: 'auto (default): beside existing content. exact: at the given coordinates.' },
+      },
+    },
+  },
+  {
+    name: 'board_clear',
+    description: 'Erase the whole shared whiteboard. Only when the user asks for it.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+);
+
 const size = (n) => (n < 1024 ? `${n} B` : n < 1 << 20 ? `${(n / 1024).toFixed(1)} KB` : `${(n / (1 << 20)).toFixed(1)} MB`);
 
 async function run(name, a, who) {
@@ -246,6 +278,25 @@ async function run(name, a, who) {
     const r = await call('POST', 'start', a, who);
     return `Started ${r.name}. ${r.note}.`;
   }
+  if (name === 'board_read') {
+    const r = await boardCall('GET', '/read');
+    const content = [];
+    if (r.snapshot && r.snapshot.png) content.push({ type: 'image', data: r.snapshot.png, mimeType: 'image/png' });
+    const age = r.snapshot ? Math.round((Date.now() - r.snapshot.at) / 1000) : null;
+    const note = !r.snapshot ? '\n(No picture yet: nobody has opened the board since it changed.)'
+      : r.snapshot.current ? '' : `\n(The picture is from ${age}s ago and may be missing the latest edits; the list above is current.)`;
+    content.push({ type: 'text', text: `${r.summary}${note}` });
+    return { content };
+  }
+  if (name === 'board_draw') {
+    const r = await boardCall('POST', '/draw', { elements: a.elements, mermaid: a.mermaid, place: a.place, from: await myName(who), wait: 20 });
+    if (r.status === 'drawn') return `Drawn on the board (${(r.ids || []).length} elements). Use board_read to see it.`;
+    return r.viewers ? 'Sent; the open board is still drawing it.' : "Queued: the board isn't open anywhere right now, so it appears when the user opens it (the desktop app opens it for them).";
+  }
+  if (name === 'board_clear') {
+    await boardCall('POST', '/clear', {});
+    return 'The board is cleared.';
+  }
   if (name === 'ask') {
     const a0 = await askCall('POST', '', {
       me: who, title: a.title, body: a.body, options: a.options, default: a.default,
@@ -264,6 +315,20 @@ async function run(name, a, who) {
 }
 
 // ---------- MCP over stdio (newline-delimited JSON-RPC) ----------
+
+async function boardCall(method, rest, data) {
+  const r = await fetch(`${URL_}/api/board${rest}`, method === 'GET' ? {} : {
+    method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(data),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || `openone server: HTTP ${r.status}`);
+  return j;
+}
+
+// this agent's openone name, to sign its drawings
+async function myName(who) {
+  try { return (await call('GET', 'roster', {}, who)).you || 'an agent'; } catch { return 'an agent'; }
+}
 
 async function askCall(method, rest, data) {
   const r = await fetch(`${URL_}/api/asks${rest}`, method === 'GET' ? {} : {
@@ -297,8 +362,9 @@ async function handle(msg) {
     try {
       const t = ME.pane ? null : codexThread(params._meta);
       const who = t ? { ...ME, thread: t.thread, cwd: t.cwd } : ME;
-      const text = await run(params.name, params.arguments || {}, who);
-      out({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text }] } });
+      const r = await run(params.name, params.arguments || {}, who);
+      // tools answer with text, or with { content } when there's a picture
+      out({ jsonrpc: '2.0', id, result: typeof r === 'string' ? { content: [{ type: 'text', text: r }] } : r });
     } catch (e) {
       out({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: String(e.message || e) }], isError: true } });
     }

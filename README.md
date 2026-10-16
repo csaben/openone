@@ -123,6 +123,20 @@ Fewer agents lying around, none lost. In the web panel and the app, each idle ag
 
 `POST /api/panes/:key/sleep` · `POST /api/sleeping/:id/wake` · `DELETE /api/sleeping/:id` (forget it)
 
+### Whiteboard
+
+One shared [Excalidraw](https://excalidraw.com) board, kept by the server at `/board`: open it from the tray (**Whiteboard**), the web panel's ⋯ menu, or the phone. Edits from every open copy merge as you go. Set `"boardHotkey": "Control+Alt+B"` in the desktop config for a global shortcut.
+
+Agents share it through three MCP tools:
+
+| | |
+| --- | --- |
+| `board_read` | a picture of the board, plus a list of its shapes, text and arrows with positions, so an agent can see what you drew or wrote for it |
+| `board_draw {elements \| mermaid, place}` | draws Excalidraw element skeletons (boxes, ellipses, text, arrows bound to shapes) or a Mermaid diagram, placed beside what's there unless `place: "exact"` |
+| `board_clear` | erases it |
+
+Agents can't render Excalidraw, so a drawing waits as an "op" until an open board page renders it. If none is open, the desktop app opens the board without taking focus. Pages upload a fresh picture after edits settle; that's what `board_read` returns. The page loads Excalidraw from esm.sh, so it needs internet access.
+
 ### Questions for you (asks)
 
 Anything can put a question with up to four buttons in front of you: "Add Dentist Thu 3pm to your calendar? Add / Skip". It shows at the top of the panel's inbox, and you answer with one tap or a number key, without opening a chat.
