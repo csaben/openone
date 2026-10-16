@@ -1,2 +1,2 @@
-android/gradlew text eol=lf
+android-app/gradlew text eol=lf
 *.jar binary
