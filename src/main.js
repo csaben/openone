@@ -158,7 +158,7 @@ async function isWatching(p) {
   if (!p.active) return false;
   const fg = await wt.request({ op: 'fg' }, 1500);
   const h = hosts[p.host];
-  return !!(fg.ok && fg.wt && fg.tab && h && new RegExp(h.cfg.wtTab, 'i').test(fg.tab));
+  return !!(fg.ok && fg.wt && fg.tab && h && new RegExp(tabPattern(h.cfg), 'i').test(fg.tab));
 }
 
 async function notify(ev) {
@@ -238,8 +238,18 @@ async function jump(key) {
   win.webContents.send('collapse');
   const pane = r.p.bg ? await r.h.src.attachBackground(r.p.bg).catch(() => null) : r.p;
   if (pane) await r.h.src.focus(pane).catch(() => {});
-  const res = await wt.focus(r.h.cfg.wtTab, r.h.cfg.wtTabIndex);
-  if (!res.ok) win.webContents.send('toast', `Couldn't find the ${r.h.cfg.name} tab in Windows Terminal`);
+  await showHost(r.h);
+}
+
+// a host's tab, by title (a regex); with none set, only its position (wtTabIndex) finds it
+const tabPattern = (hc) => hc.wtTab || '(?!)';
+
+// Brings the host's Windows Terminal tab forward (by name, or by position when the tab
+// row is hidden, see wt-focus.ps1). Says so in a notification when it can't: the panel
+// has already closed, so its own toast would go unseen.
+async function showHost(h) {
+  const res = await wt.focus(tabPattern(h.cfg), h.cfg.wtTabIndex);
+  if (!res.ok) note(`Couldn't find the ${h.cfg.name} tab in Windows Terminal`, `${res.error || ''}. Set "wtTab" or "wtTabIndex" for ${h.cfg.name} in the config.`);
 }
 
 // ---------- projects ----------
@@ -271,8 +281,7 @@ async function startProject(opts) {
   const pane = await projects.start(h, cfg, opts);
   win.webContents.send('collapse');
   await h.src.focus(pane).catch(() => {});
-  const res = await wt.focus(h.cfg.wtTab, h.cfg.wtTabIndex);
-  if (!res.ok) win.webContents.send('toast', `Started, but couldn't find the ${h.cfg.name} tab in Windows Terminal`);
+  await showHost(h);
   return `${h.cfg.name}|${pane.session}|${pane.paneId}`;
 }
 

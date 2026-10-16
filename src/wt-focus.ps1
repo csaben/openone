@@ -63,7 +63,22 @@ while ($true) {
         $tabs = Get-Tabs $wins[0]
         if ($req.index -lt $tabs.Count) { $hit = $tabs[$req.index]; $hitWin = $wins[0] }
       }
-      if (-not $hit) { Reply @{ ok = $false; error = 'no matching Windows Terminal tab' }; continue }
+      if (-not $hit) {
+        # Fullscreen (or a single tab) hides the tab row, so there are no tabs to find. Ask
+        # Windows Terminal itself to switch to the host's tab by position, after raising
+        # the window so it's the one `-w 0` (most recently used) means.
+        $bare = @($wins | Where-Object { (Get-Tabs $_).Count -eq 0 })
+        if ($bare.Count -gt 0) {
+          $w = $bare | Where-Object { $req.tab -and $_.Current.Name -match $req.tab } | Select-Object -First 1
+          if ($w) { Raise $w; Reply @{ ok = $true; name = $w.Current.Name; hidden = $true }; continue }
+          if ($null -ne $req.index) {
+            Raise $bare[0]
+            Start-Process wt.exe -ArgumentList '-w', '0', 'focus-tab', '--target', ([int]$req.index) -WindowStyle Hidden
+            Reply @{ ok = $true; index = [int]$req.index; hidden = $true }; continue
+          }
+        }
+        Reply @{ ok = $false; error = 'no matching Windows Terminal tab'; windows = $wins.Count }; continue
+      }
       $hit.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
       Raise $hitWin
       Reply @{ ok = $true; name = $hit.Current.Name }
@@ -73,7 +88,7 @@ while ($true) {
       $w = $wins | Where-Object { $_.Current.NativeWindowHandle -eq $fg } | Select-Object -First 1
       if (-not $w) { Reply @{ ok = $true; wt = $false }; continue }
       $sel = Get-Tabs $w | Where-Object { $_.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Current.IsSelected } | Select-Object -First 1
-      Reply @{ ok = $true; wt = $true; tab = $(if ($sel) { $sel.Current.Name } else { '' }) }
+      Reply @{ ok = $true; wt = $true; tab = $(if ($sel) { $sel.Current.Name } elseif ((Get-Tabs $w).Count -eq 0) { $w.Current.Name } else { '' }) }
     }
     else { Reply @{ ok = $false; error = "unknown op $($req.op)" } }
   } catch {
