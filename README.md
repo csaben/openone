@@ -50,7 +50,15 @@ Per host, `workspace` is the folder that holds your projects (default `~/Code`),
 
 `server/` runs the same watcher on an always-on Linux box. It reaches every machine over ssh, serves the same panel as a web page, and exposes an HTTP API to answer agents and start new sessions. It keeps no state of its own; tmux on each machine is the source of truth.
 
-The phone view is this web page, not an app: there's no APK or iOS build. Open the server's address on your phone over Tailscale and use **Add to Home Screen** to get an app-like icon. Notifications only arrive while the page is open (no push yet).
+On the phone, open the same page in a browser over Tailscale, or install the Android app.
+
+**Android app** (`android/`, plain Java, no dependencies): the panel in a WebView, plus a background service that holds one connection to the server's event stream over your tailnet. No Google or Expo push service is involved. Whatever needs you becomes a notification you can act on without opening anything:
+
+- questions ([asks](#questions-for-you-asks)): their options as buttons
+- an agent waiting at a menu: the menu's options as buttons
+- an agent that finished: **Got it** (marks it seen) and an inline **Reply**
+
+A notification clears itself once the item is handled anywhere: on the phone, at the desk or in a terminal. Build it with `cd android && ./gradlew assembleRelease` (JDK 17, Android SDK 36), install the APK, and enter the server's address on first launch. Allow it to run in the background when asked, so the connection survives the screen being off. There's no iOS app.
 
 ```bash
 cp server/config.example.json server/config.json    # list your hosts

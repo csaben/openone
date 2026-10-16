@@ -227,7 +227,7 @@
       : '<button data-a="notify">Enable notifications</button>';
     menu.innerHTML = `<button data-a="project">Start or continue a project…</button>
       <button data-a="new">New session…</button>
-      <button data-a="shells">${showShells ? 'Hide' : 'Show'} shells</button>${notif}`;
+      <button data-a="shells">${showShells ? 'Hide' : 'Show'} shells</button>${notif}${window.OOApp ? '<button data-a="server">Server address…</button>' : ''}`;
     menu.classList.toggle('show');
   }
 
@@ -240,6 +240,7 @@
     if (a === 'notify') Notification.requestPermission();
     if (a === 'new') newSession();
     if (a === 'project' && window.ooProjects) window.ooProjects();
+    if (a === 'server' && window.OOApp) window.OOApp.changeServer(); // the Android app
   });
 
   document.addEventListener('click', (e) => {
