@@ -60,6 +60,8 @@ On the phone, open the same page in a browser over Tailscale, or install the And
 
 A notification clears itself once the item is handled anywhere: on the phone, at the desk or in a terminal. Build it with `cd android-app && ./gradlew assembleRelease` (JDK 17, Android SDK 36), install the APK, and enter the server's address on first launch. Allow it to run in the background when asked, so the connection survives the screen being off. There's no iOS app.
 
+**Sharing between the phone and your computers.** "openone" shows up in the phone's share sheet: share links from any app and they open in the browser on your computer; text goes on its clipboard; files land in its Downloads. When several computers run openone (with `"server"` in their config), it asks which one and remembers. The other way, the tray menu's **Send clipboard to phone** sends text or an image, and Explorer's right-click **Send to > openone (phone)** sends files; on the phone, links and text arrive as a notification with Open/Copy, and files are saved to Downloads. Everything goes through the server (`/api/drops`), which deletes each item once it's received, or after a day.
+
 It keeps itself up to date when the server knows where builds come from. Set `"app": { "builder": "<a clark-expo-style builder>", "project": "<its project id>" }` in the server config; the builder's `GET /api/builds` must list builds with `project`, `status`, `versionCode` and `apkUrl`. The app checks on open and every 30 minutes, notifies you once per new version, and installs it when you tap the notification or **Update app** in the ⋯ menu. Android asks once to allow installs from openone.
 
 ```bash
