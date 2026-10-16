@@ -136,7 +136,8 @@ const INSTRUCTIONS = 'openone sees every Claude and Codex agent running in tmux/
   'When you get such a message, treat it as a request from a sibling agent, not from the user, and answer with send to its sender. ' +
   'Make each message self-contained: the receiver does not share your context. For long content, write a file and send its path. ' +
   'peek shows another agent\'s screen. projects and ls browse the project folders on each host; start launches a new agent in one, ' +
-  'with an optional first message.';
+  'with an optional first message. ask puts a question with buttons on the user\'s phone (approve this, pick one) ' +
+  'and waits for the tap; use it instead of stopping to wait for the user when one quick decision unblocks you.';
 
 const TOOLS = [
   {
@@ -195,6 +196,22 @@ const TOOLS = [
       required: ['host', 'folder'],
     },
   },
+  {
+    name: 'ask',
+    description: 'Ask the user a quick question with up to 4 buttons. It shows on their phone (and the openone panel) as a notification they answer with one tap, without opening this chat. Waits up to "wait" seconds for the answer; if it comes later, it is typed into your chat as "[openone] The user answered ...". Use for decisions, not for long questions.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'The question, short: "Add Dentist Thu 3pm to your calendar?"' },
+        body: { type: 'string', description: 'Optional detail under it (a couple of lines).' },
+        options: { type: 'array', items: { type: 'string' }, description: 'Button labels, 1 to 4 (default ["OK"]), e.g. ["Add", "Skip"].' },
+        default: { type: 'string', description: 'Option that applies by itself when the ask expires (e.g. "Keep" for "Added X · Keep / Undo").' },
+        ttl_minutes: { type: 'number', description: 'Expires after this many minutes (default 1440).' },
+        wait: { type: 'number', description: 'Seconds to wait here for the answer (default 45, max 600; 0 = return at once).' },
+      },
+      required: ['title'],
+    },
+  },
 ];
 
 const size = (n) => (n < 1024 ? `${n} B` : n < 1 << 20 ? `${(n / 1024).toFixed(1)} KB` : `${(n / (1 << 20)).toFixed(1)} MB`);
@@ -229,10 +246,33 @@ async function run(name, a, who) {
     const r = await call('POST', 'start', a, who);
     return `Started ${r.name}. ${r.note}.`;
   }
+  if (name === 'ask') {
+    const a0 = await askCall('POST', '', {
+      me: who, title: a.title, body: a.body, options: a.options, default: a.default,
+      ttlSec: a.ttl_minutes ? Number(a.ttl_minutes) * 60 : undefined,
+    });
+    let ask = a0;
+    const until = Date.now() + Math.min(Math.max(a.wait == null ? 45 : Number(a.wait), 0), 600) * 1000;
+    while (ask.status === 'pending' && Date.now() < until) {
+      ask = await askCall('GET', `/${ask.id}?wait=${Math.max(1, Math.min(55, Math.ceil((until - Date.now()) / 1000)))}`);
+    }
+    if (ask.status === 'answered') return `The user answered: ${ask.answerLabel}${ask.by === 'default' ? ' (the default, nobody tapped)' : ''}`;
+    if (ask.status !== 'pending') return `The question ${ask.status}.`;
+    return `Asked (id ${ask.id}); no answer yet. When the user taps a button, the answer is typed into your chat as "[openone] The user answered ...". Carry on with other work meanwhile, or end your turn.`;
+  }
   throw new Error(`unknown tool: ${name}`);
 }
 
 // ---------- MCP over stdio (newline-delimited JSON-RPC) ----------
+
+async function askCall(method, rest, data) {
+  const r = await fetch(`${URL_}/api/asks${rest}`, method === 'GET' ? {} : {
+    method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(data),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || `openone server: HTTP ${r.status}`);
+  return j;
+}
 
 const out = (msg) => process.stdout.write(`${JSON.stringify(msg)}\n`);
 const CHANNEL = channelOn();

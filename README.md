@@ -69,6 +69,7 @@ Host types: `tmux` (the server machine itself), `ssh` (remote tmux) and `ssh-psm
 | `POST /api/hosts/:host/sessions` `{name, cwd, cmd}` | start a detached session and type `cmd` into it |
 | `DELETE /api/hosts/:host/sessions/:name` | kill a session |
 | `/api/bus/…` `roster` · `send` · `peek` · `projects` · `ls` · `start` · `listen` · `messages` | the agent tools below |
+| `/api/asks/…` | questions for you, below |
 
 ### Agents talking to each other
 
@@ -81,6 +82,7 @@ Host types: `tmux` (the server machine itself), `ssh` (remote tmux) and `ssh-psm
 | `peek {name, lines}` | read another agent's screen |
 | `projects {host}` · `ls {host, path}` | the folders in each host's workspace, and what's inside them |
 | `start {host, folder, agent, prompt, create, resume}` | start a new agent in a project, with a first message signed by the caller |
+| `ask {title, body, options, default, wait}` | put a question with buttons on your phone and wait for the tap (see [asks](#questions-for-you-asks)) |
 
 A message is typed into the target's chat as `[openone message from <name> …] <text>` once the target is idle, so it never interrupts a turn or a menu waiting for you. A Claude session started with `--dangerously-load-development-channels server:openone` gets it pushed right away as a channel event instead. The panel shows each agent's latest message on its row. A reply chain stops after 6 hops between agents until you step in (answering, replying or opening the agent resets it), and an agent can send 30 messages per 10 minutes.
 
@@ -102,6 +104,22 @@ env_vars = ["TMUX", "TMUX_PANE", "PSMUX_SESSION"]
 `OPENONE_HOST` overrides the host name the tool reports (default: the machine's hostname, which should match the host's `name` in the server config). On the desktop app, `"server": "https://<server>:8951"` in the config shows the messages in the panel.
 
 A message typed into a pane reads like a prompt from you, so any agent can steer any other. The tool tells agents to treat these as requests from a sibling, not from you, and every message is logged, but only use this between agents you'd let act on each other's behalf.
+
+### Questions for you (asks)
+
+Anything can put a question with up to four buttons in front of you: "Add Dentist Thu 3pm to your calendar? Add / Skip". It shows at the top of the panel's inbox, and you answer with one tap or a number key, without opening a chat.
+
+- **Agents** use the MCP `ask` tool. It waits up to 45 seconds for your answer; if you answer later, the answer is typed into the agent's chat as `[openone] The user answered …`.
+- **Scripts** run `node src/ask-cli.js "Add Dentist Thu 3pm?" -o Add -o Skip`, which prints the label you picked (exit 2 if it expired). Or they call the HTTP API directly:
+
+| | |
+| --- | --- |
+| `POST /api/asks` `{title, body, options, default, ttlSec, tag, callback, from}` | ask; returns the ask with its `id` |
+| `GET /api/asks/:id?wait=55` | long-poll until it's answered |
+| `POST /api/asks/:id/answer` `{option}` | answer by option id, label or number |
+| `GET /api/asks` · `DELETE /api/asks/:id` | what's pending · withdraw one |
+
+`default` applies by itself when the ask expires (after `ttlSec`, one day by default), which suits "Added Dentist Thu 3pm · Keep / Undo". With a `tag`, asking again while one is pending returns that one instead of a duplicate. `callback` gets the answered ask POSTed to it. Pending asks are kept in `~/.local/state/openone/asks.json`, so they survive a restart.
 
 ## Notes
 

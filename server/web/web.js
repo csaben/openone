@@ -26,7 +26,7 @@
   function emitState() {
     fire('state', {
       panes: last.panes.filter((p) => showShells || p.state !== 'shell'),
-      hosts: last.hosts, showShells, muted,
+      hosts: last.hosts, showShells, muted, asks: last.asks || [], messages: last.messages || [],
     });
   }
 
@@ -48,6 +48,12 @@
         icon: 'assets/app-256.png', tag: p.key,
       });
       n.onclick = () => { window.focus(); viewer(p.key); };
+    });
+    es.addEventListener('ask', (e) => {
+      const a = JSON.parse(e.data);
+      if (muted || !('Notification' in window) || Notification.permission !== 'granted' || !document.hidden) return;
+      const n = new Notification(a.title, { body: `${a.from}${a.body ? ` · ${a.body}` : ''}`.slice(0, 200), icon: 'assets/app-256.png', tag: `ask:${a.id}` });
+      n.onclick = () => { window.focus(); fire('expand'); };
     });
     es.addEventListener('reload', () => location.reload());
     es.onerror = () => {}; // EventSource reconnects by itself
@@ -283,6 +289,7 @@
     answer: (key, n) => call('POST', `api/panes/${enc(key)}/answer`, { n }).catch((e) => toast(e.message)),
     reply: (key, text) => call('POST', `api/panes/${enc(key)}/reply`, { text }).catch((e) => toast(e.message)),
     seen: (key) => call('POST', `api/panes/${enc(key)}/seen`).catch(() => {}),
+    answerAsk: (id, option) => call('POST', `api/asks/${enc(id)}/answer`, { option, by: 'web' }),
     projects: () => call('GET', 'api/projects'),
     semantic: (q) => call('GET', `api/projects/semantic?q=${enc(q)}`),
     startProject: async (opts) => { const r = await call('POST', 'api/projects', opts); viewer(r.key); return r.key; },

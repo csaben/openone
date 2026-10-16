@@ -45,7 +45,10 @@ function doneTime(s) {
 }
 const lastUsed = (p) => (p.state === 'working' ? Date.now() : Math.max(p.used || 0, doneTime(p.doneAt)));
 const byPriority = (a, b) => RANK[status(a)] - RANK[status(b)] || lastUsed(b) - lastUsed(a) || b.since - a.since;
-const inbox = () => S.panes.filter((p) => p.unseen && p.kind).sort(byPriority);
+// questions put to you (the openone server's asks) come first, then the agents
+const askItems = () => (S.asks || []).map((a) => ({ key: `ask:${a.id}`, ask: a }));
+const inbox = () => [...askItems(), ...S.panes.filter((p) => p.unseen && p.kind).sort(byPriority)];
+const curAsk = () => { const it = view === 'inbox' && askItems().find((x) => x.key === cur); return it ? it.ask : null; };
 const find = (key) => S.panes.find((p) => p.key === key);
 
 function ago(t) {
@@ -133,6 +136,7 @@ function inboxCard(items) {
   const p = items[idx];
   const pager = items.length > 1
     ? `<div class="pager">${items.map((x, i) => `<i class="${i === idx ? 'cur' : ''}" data-cur="${esc(x.key)}"></i>`).join('')}</div>` : '';
+  if (p.ask) return askCard(p.ask, items, pager);
   let mid = '';
   if (p.state === 'input') {
     mid = `<div class="q">${esc(p.question || 'Waiting for your answer')}</div>${p.detail ? `<pre class="cmd">${esc(p.detail)}</pre>` : ''}
@@ -148,6 +152,25 @@ function inboxCard(items) {
     ? `Press ${n <= 3 ? (p.options.map((o) => `<kbd>${o.n}</kbd>`).join(n === 3 ? ', ' : ' or ').replace(/, (?=[^,]*$)/, ' or ')) : `<kbd>1</kbd> – <kbd>${n}</kbd>`} to answer`
     : `<kbd>Enter</kbd> ${OPEN_HINT}${items.length > 1 ? ' · <kbd>j</kbd><kbd>k</kbd> next' : ''}`;
   return { html, hint: `${hint} · <kbd>r</kbd> reply · <kbd>Tab</kbd> list` };
+}
+
+const ASK = '<svg viewBox="0 0 16 16" style="color:var(--input, #e5a03a)"><path d="M6 6a2 2 0 1 1 2.8 1.8c-.5.3-.8.7-.8 1.2v.5"/><circle cx="8" cy="12" r=".6"/></svg>';
+function askCard(a, items, pager) {
+  const html = `<div class="head"><h1>Question</h1>${pager}<button class="x" data-close>${X}</button></div>
+    <div class="who"><div class="avatar">${ASK}<span class="st input"></span></div>
+      <div><div class="name">${esc(a.from)}</div><div class="sub">Asked ${ago(a.at) === 'now' ? 'just now' : `${ago(a.at)} ago`}${a.default ? ` · ${esc(a.options.find((o) => o.id === a.default).label)} if no answer` : ''}</div></div></div>
+    <div class="q">${esc(a.title)}</div>${a.body ? `<div class="summary">${esc(a.body)}</div>` : ''}
+    <div class="opts">${a.options.map((o, i) => `<button class="opt" data-ask="${esc(a.id)}" data-opt="${esc(o.id)}"><span class="n">${i + 1}</span><span class="l">${esc(o.label)}</span></button>`).join('')}</div>`;
+  const n = a.options.length;
+  const hint = `Press ${n === 1 ? '<kbd>1</kbd>' : `<kbd>1</kbd> – <kbd>${n}</kbd>`} to answer${items.length > 1 ? ' · <kbd>j</kbd><kbd>k</kbd> next' : ''} · <kbd>Tab</kbd> list`;
+  return { html, hint };
+}
+
+function answerAsk(id, opt) {
+  const el = body.querySelector(`.opt[data-opt="${CSS.escape(opt)}"]`);
+  if (el) el.classList.add('kb');
+  window.oo.answerAsk(id, opt).catch((err) => toast(err.message));
+  setTimeout(() => { S.asks = (S.asks || []).filter((a) => a.id !== id); render(); }, 140);
 }
 
 function agentsCard() {
@@ -663,8 +686,9 @@ $('#b-term').addEventListener('click', () => {
 });
 
 body.addEventListener('click', (e) => {
-  const t = e.target.closest('[data-close],[data-jump],[data-n],[data-send],[data-cur],[data-proj],[data-row],[data-start],[data-code]');
+  const t = e.target.closest('[data-close],[data-jump],[data-n],[data-send],[data-cur],[data-proj],[data-row],[data-start],[data-code],[data-ask]');
   if (!t) return;
+  if (t.dataset.ask) { answerAsk(t.dataset.ask, t.dataset.opt); return; }
   if (t.dataset.start !== undefined) { launch(); return; }
   if (t.dataset.code !== undefined) { window.oo.code({ host: proj.pick.host, folder: proj.pick.name }).catch((err) => toast(err.message)); return; }
   if (t.dataset.proj !== undefined) { proj.sel = Number(t.dataset.proj); choose(proj.sel); return; }
@@ -725,6 +749,9 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && query !== null && !typing) { closeSearch(); return; }
   if (e.key === 'Escape') { if (typing) e.target.blur(); else collapse(); return; }
   if (typing) { if (e.key === 'Enter' && e.target.id === 'reply') sendReply(); return; }
+  const q = curAsk();
+  if (q && /^[1-4]$/.test(e.key) && q.options[Number(e.key) - 1]) { answerAsk(q.id, q.options[Number(e.key) - 1].id); return; }
+  if (q && (e.key === 'Enter' || e.key === 'r')) return;
   const p = view === 'inbox' && inbox().length ? find(cur) : null;
   if (p && p.state === 'input' && /^[1-9]$/.test(e.key) && (p.options || []).some((o) => o.n === Number(e.key))) {
     answer(p.key, Number(e.key));

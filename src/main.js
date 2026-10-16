@@ -39,6 +39,7 @@ let hosts = {};
 let muted = false;
 let pushTimer = null;
 let messages = []; // agent-to-agent messages, from the openone server ("server" in the config)
+let asks = []; // questions waiting on you, from the same server
 const wt = new WindowsTerminal();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -134,6 +135,7 @@ function state() {
     showShells: !!cfg.showShells,
     muted,
     messages,
+    asks,
   };
 }
 
@@ -399,6 +401,14 @@ app.whenReady().then(() => {
   ipcMain.handle('project:semantic', (_e, q) => searchProjects(String(q || '')));
   ipcMain.handle('project:start', (_e, opts) => startProject(opts));
   ipcMain.handle('project:code', (_e, target) => openInCode(target));
+  ipcMain.handle('ask:answer', async (_e, id, option) => {
+    const r = await fetch(`${serverUrl()}/api/asks/${encodeURIComponent(id)}/answer`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ option, by: 'desk' }), signal: AbortSignal.timeout(8000),
+    });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`);
+    asks = asks.filter((a) => a.id !== id);
+    push();
+  });
   ipcMain.on('pane:seen', (_e, key) => { monitor.markSeen(key); push(); tellServer(key); });
   if (cfg.server) pollMessages();
 });
@@ -412,6 +422,8 @@ async function pollMessages() {
     try {
       const r = await fetch(`${serverUrl()}/api/bus/messages?n=40`, { signal: AbortSignal.timeout(8000) });
       if (r.ok) { const m = await r.json(); if (JSON.stringify(m) !== JSON.stringify(messages)) { messages = m; push(); } }
+      const q = await fetch(`${serverUrl()}/api/asks`, { signal: AbortSignal.timeout(8000) });
+      if (q.ok) { const a = await q.json(); if (JSON.stringify(a) !== JSON.stringify(asks)) { asks = a; push(); } }
     } catch {}
     await new Promise((r) => setTimeout(r, 4000));
   }

@@ -15,6 +15,7 @@ const actions = require('../src/actions');
 const projects = require('../src/projects');
 const { Embedder, semantic, projectText } = require('../src/embed');
 const { Bus, names } = require('../src/bus');
+const { Asks, view: askView } = require('../src/asks');
 
 
 const ROOT = path.join(__dirname, '..');
@@ -38,6 +39,22 @@ const bus = new Bus({
     pushState();
   },
 });
+// questions for you, answered from the phone; kept in ~/.local/state/openone
+const asks = new Asks({
+  file: cfg.asksFile || path.join(require('os').homedir(), '.local', 'state', 'openone', 'asks.json'),
+  onChange: () => pushState(),
+  // an agent that stopped waiting gets the answer typed into its chat
+  onAnswer: (a, delivered) => {
+    // (a long-poller between two polls counts as waiting)
+    if (delivered || !a.fromKey || Date.now() - (polled.get(a.id) || 0) < 5000) return;
+    const text = a.status === 'answered'
+      ? `The user answered your question "${a.title}": ${a.answerLabel}${a.by === 'default' ? ' (nobody answered, so the default applied)' : ''}`
+      : `Your question "${a.title}" expired without an answer.`;
+    try { bus.send({ fromName: 'openone', to: a.fromKey, content: text, note: true }); pushState(); } catch {}
+  },
+});
+const polled = new Map(); // ask id -> last time someone long-polled it
+setInterval(() => asks.sweep(), 15000);
 const clients = new Set();
 let lastState = '';
 
@@ -47,6 +64,7 @@ function state() {
   return {
     panes: monitor.view(),
     messages: bus.recent(40),
+    asks: asks.pending().map(askView),
     hosts: Object.values(hosts).map((h) => ({ name: h.cfg.name, type: h.cfg.type, ok: h.ok, error: h.error, fed: !!fedRecently(h) })),
   };
 }
@@ -236,6 +254,7 @@ async function api(req, res, parts) {
   }
 
   if (a === 'bus') return busApi(req, res, b);
+  if (a === 'asks') return asksApi(req, res, b ? decodeURIComponent(b) : '', c);
 
   if (m === 'POST' && a === 'hosts' && b && c === 'snapshot') {
     const h = hosts[decodeURIComponent(b)];
@@ -351,6 +370,48 @@ async function busApi(req, res, what) {
     req.on('close', () => { clearInterval(beat); off(); });
     return;
   }
+  return send(res, 404, { error: 'not found' });
+}
+
+// ---------- asks: questions for you (src/asks.js) ----------
+//
+//   POST   /api/asks               { title, body?, options?, default?, ttlSec?, tag?, callback?, from?, project? }
+//                                  (+ me: the MCP caller's pane, which signs it and gets late answers)
+//   GET    /api/asks               pending ones; ?all=1 adds the recent settled ones
+//   GET    /api/asks/:id?wait=55   the ask, once answered or after wait seconds (max 55)
+//   POST   /api/asks/:id/answer    { option, by? }   option = id, label or number
+//   DELETE /api/asks/:id           withdraw it
+
+async function asksApi(req, res, id, action) {
+  const m = req.method;
+  const q = new URL(req.url, 'http://x').searchParams;
+  if (!id) {
+    if (m === 'GET') return send(res, 200, (q.get('all') ? asks.recent(50) : asks.pending()).map(askView));
+    if (m === 'POST') {
+      const body = await readJson(req);
+      const me = body.me ? bus.whoami(body.me) : null;
+      const from = me ? bus.names().get(me.key) : String(body.from || '');
+      try {
+        const a = asks.create({ ...body, from, fromKey: me ? me.key : null });
+        broadcast('ask', askView(a));
+        return send(res, 201, askView(a));
+      } catch (e) { return send(res, 400, { error: e.message }); }
+    }
+    return send(res, 405, { error: 'method' });
+  }
+  if (m === 'GET' && !action) {
+    polled.set(id, Date.now());
+    const a = await asks.wait(id, Math.min(Number(q.get('wait')) || 0, 55) * 1000);
+    polled.set(id, Date.now());
+    if (polled.size > 500) polled.delete(polled.keys().next().value);
+    return send(res, 200, askView(a));
+  }
+  if (m === 'POST' && action === 'answer') {
+    const body = await readJson(req);
+    try { return send(res, 200, askView(asks.answer(id, body.option, String(body.by || 'you').slice(0, 20)))); }
+    catch (e) { return send(res, e.code || 400, { error: e.message }); }
+  }
+  if (m === 'DELETE' && !action) return send(res, 200, askView(asks.cancel(id)));
   return send(res, 404, { error: 'not found' });
 }
 

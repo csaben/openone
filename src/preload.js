@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('oo', {
   jump: (key) => ipcRenderer.invoke('pane:jump', key),
   answer: (key, n) => ipcRenderer.invoke('pane:answer', key, n),
   reply: (key, text) => ipcRenderer.invoke('pane:reply', key, text),
+  answerAsk: (id, option) => ipcRenderer.invoke('ask:answer', id, option),
   seen: (key) => ipcRenderer.send('pane:seen', key),
   projects: () => ipcRenderer.invoke('project:list'),
   semantic: (q) => ipcRenderer.invoke('project:semantic', q),
