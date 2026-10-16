@@ -37,6 +37,21 @@ public class MainActivity extends Activity {
         super.onCreate(state);
         if (Prefs.url(this).isEmpty()) setup(null);
         else open();
+        maybeUpdate(getIntent());
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        maybeUpdate(intent);
+    }
+
+    // the "update is ready" notification opens the app with this
+    private void maybeUpdate(Intent i) {
+        if (i != null && i.getBooleanExtra("update", false)) {
+            i.removeExtra("update");
+            Updater.run(this);
+        }
     }
 
     private void open() {
@@ -144,6 +159,7 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         if (web != null) web.onResume();
+        if (!Prefs.url(this).isEmpty()) new Thread(() -> Updater.check(this), "openone-update").start();
     }
 
     @Override
@@ -172,6 +188,16 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void changeServer() {
             runOnUiThread(() -> setup(null));
+        }
+
+        @JavascriptInterface
+        public String version() {
+            return Updater.installedName(MainActivity.this);
+        }
+
+        @JavascriptInterface
+        public void update() {
+            runOnUiThread(() -> Updater.run(MainActivity.this));
         }
     }
 }

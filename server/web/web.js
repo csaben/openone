@@ -236,7 +236,7 @@
     menu.innerHTML = `<button data-a="project">Start or continue a project…</button>
       <button data-a="next">What's next? (suggestions)…</button>
       <button data-a="new">New session…</button>
-      <button data-a="shells">${showShells ? 'Hide' : 'Show'} shells</button>${notif}${window.OOApp ? '<button data-a="server">Server address…</button>' : ''}`;
+      <button data-a="shells">${showShells ? 'Hide' : 'Show'} shells</button>${notif}${window.OOApp ? `<button data-a="update">Update app (you have ${window.OOApp.version()})</button><button data-a="server">Server address…</button>` : ''}`;
     menu.classList.toggle('show');
   }
 
@@ -251,6 +251,7 @@
     if (a === 'next') nextSheet();
     if (a === 'project' && window.ooProjects) window.ooProjects();
     if (a === 'server' && window.OOApp) window.OOApp.changeServer(); // the Android app
+    if (a === 'update' && window.OOApp) window.OOApp.update();
   });
 
   document.addEventListener('click', (e) => {

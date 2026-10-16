@@ -281,6 +281,7 @@ async function api(req, res, parts) {
     }
     if (m === 'DELETE' && !c) { sleepers.take(id); pushState(); return send(res, 200, { ok: true }); }
   }
+  if (m === 'GET' && a === 'app') return send(res, 200, await latestApp());
   if (a === 'suggest' && !b) {
     if (m === 'GET') return send(res, 200, { ...suggester.status(), active: await activeProjects().catch(() => []) });
     if (m === 'POST') {
@@ -408,6 +409,26 @@ async function busApi(req, res, what) {
     return;
   }
   return send(res, 404, { error: 'not found' });
+}
+
+// ---------- the Android app's updates ----------
+//
+// GET /api/app -> { versionCode, versionName, apkUrl } of the newest build, which the app
+// compares with its own version. Builds come from a clark-expo-style builder:
+//   "app": { "builder": "http://127.0.0.1:7400", "project": "<its project id>" }
+// (its GET /api/builds lists builds with project, status, versionCode, apkUrl).
+let appCache = { at: 0, v: null };
+async function latestApp() {
+  const c = cfg.app || {};
+  if (!c.builder || !c.project) return { versionCode: 0, error: 'no "app" builder in the server config' };
+  if (Date.now() - appCache.at < 60000 && appCache.v) return appCache.v;
+  try {
+    const r = await fetch(`${String(c.builder).replace(/\/$/, '')}/api/builds`, { signal: AbortSignal.timeout(8000) });
+    const b = (await r.json()).filter((x) => x.project === c.project && x.status === 'success' && x.apkUrl)
+      .sort((x, y) => Number(y.versionCode) - Number(x.versionCode) || String(y.id).localeCompare(String(x.id)))[0];
+    appCache = { at: Date.now(), v: b ? { versionCode: Number(b.versionCode), versionName: b.versionName, apkUrl: b.apkUrl } : { versionCode: 0 } };
+  } catch (e) { return { versionCode: 0, error: String(e.message || e) }; }
+  return appCache.v;
 }
 
 // ---------- next-step suggestions (src/suggest.js) ----------

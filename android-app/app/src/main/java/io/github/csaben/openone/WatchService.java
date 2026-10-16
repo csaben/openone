@@ -122,6 +122,7 @@ public class WatchService extends Service {
                 conn = c;
                 if (c.getResponseCode() != 200) throw new Exception("HTTP " + c.getResponseCode());
                 backoff = 2000;
+                checkUpdate();
                 BufferedReader in = new BufferedReader(new InputStreamReader(c.getInputStream(), StandardCharsets.UTF_8));
                 String event = "message";
                 StringBuilder data = new StringBuilder();
@@ -160,6 +161,15 @@ public class WatchService extends Service {
         }
     }
 
+    private long checkedAt;
+
+    /** On each (re)connect, at most every 30 minutes: is there a newer app build? */
+    private void checkUpdate() {
+        if (System.currentTimeMillis() - checkedAt < 30 * 60_000L) return;
+        checkedAt = System.currentTimeMillis();
+        new Thread(() -> Updater.check(this), "openone-update").start();
+    }
+
     private static String shortError(Exception e) {
         String m = e.getMessage();
         if (m == null || m.isEmpty()) m = e.getClass().getSimpleName();
@@ -175,6 +185,7 @@ public class WatchService extends Service {
     }
 
     private synchronized void apply(JSONObject s) {
+        checkUpdate(); // throttled; a long-lived connection still notices new builds
         Set<String> want = new HashSet<>();
         boolean quiet = first; // what was already waiting when we connected: post it, but silently
         first = false;
