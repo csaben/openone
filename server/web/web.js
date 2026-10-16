@@ -80,6 +80,14 @@
     clearInterval(timer);
   }
 
+  // Android's back gesture (the app asks this first): close what's open, true if it did
+  window.ooBack = () => {
+    if (sheet.classList.contains('show')) { closeSheet(); return true; }
+    const m = document.getElementById('webmenu');
+    if (m && m.classList.contains('show')) { m.classList.remove('show'); return true; }
+    return false;
+  };
+
   // Agent panes default to the chat view (prompts as bubbles, reflowed replies, folded
   // tool calls); "term" shows the terminal itself, in color. Shells are always term.
   let chatView = store.get('chat', true);
@@ -188,8 +196,8 @@
 
   sheet.addEventListener('click', async (e) => {
     const t = e.target.closest('button');
+    if (t && t.dataset.close !== undefined) return closeSheet(); // every sheet, not just the pane viewer
     if (!t || !viewing) return;
-    if (t.dataset.close !== undefined) return closeSheet();
     if (t.dataset.zoom) return setFont(fontPx + Number(t.dataset.zoom));
     if (t.dataset.wrap !== undefined) { wrap = !wrap; store.set('wrap', wrap); applyView(); return render(true); }
     if (t.dataset.view !== undefined) { chatView = !chatView; store.set('chat', chatView); applyView(); return render(true); }

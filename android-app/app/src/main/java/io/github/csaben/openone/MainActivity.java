@@ -154,8 +154,16 @@ public class MainActivity extends Activity {
 
     @Override
     public void onBackPressed() {
-        if (web != null && web.canGoBack()) web.goBack();
-        else moveTaskToBack(true);
+        if (web == null) {
+            moveTaskToBack(true);
+            return;
+        }
+        // the page closes its open sheet or menu first (window.ooBack in server/web/web.js)
+        web.evaluateJavascript("!!(window.ooBack && window.ooBack())", v -> {
+            if ("true".equals(v)) return;
+            if (web.canGoBack()) web.goBack();
+            else moveTaskToBack(true);
+        });
     }
 
 
