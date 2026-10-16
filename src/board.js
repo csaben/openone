@@ -57,7 +57,21 @@ class Board {
   }
 
   scene() {
-    return { version: this.version, elements: [...this.elements.values()], files: this.files, ops: this.ops.filter((o) => !o.done) };
+    return { version: this.version, elements: this.ordered(), files: this.files, ops: this.ops.filter((o) => !o.done) };
+  }
+
+  // back to front, by Excalidraw's fractional `index` (plain string order); elements
+  // without one keep arrival order, after the rest
+  ordered() {
+    const all = [...this.elements.values()];
+    const key = (e) => (typeof e.index === 'string' ? e.index : null);
+    return all.map((e, i) => [e, i]).sort(([a, i], [b, j]) => {
+      const x = key(a);
+      const y = key(b);
+      if (x !== null && y !== null && x !== y) return x < y ? -1 : 1;
+      if ((x === null) !== (y === null)) return x === null ? 1 : -1;
+      return i - j;
+    }).map(([e]) => e);
   }
 
   // the newer of each element wins; ties broken by versionNonce like Excalidraw does

@@ -74,3 +74,13 @@ test('board: kept on disk, snapshot included', () => {
   assert.deepEqual(Object.keys(again.files), ['f1']);
   assert.equal(again.snapshot().png.length, 10);
 });
+
+test('board: elements come back in drawing order (fractional index), so a pinned screenshot stays behind', () => {
+  const b = new Board();
+  b.merge([el('stroke', 1, { index: 'a1' }), el('later', 1), el('shot', 1, { index: 'a0' }), el('top', 1, { index: 'a2' })]);
+  assert.deepEqual(b.scene().elements.map((e) => e.id), ['shot', 'stroke', 'top', 'later']);
+  assert.deepEqual(new Board().ordered(), []);
+  // "Zz" < "a0" in plain string order, as Excalidraw's keys expect
+  b.merge([el('first', 1, { index: 'Zz' })]);
+  assert.equal(b.scene().elements[0].id, 'first');
+});

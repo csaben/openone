@@ -10,6 +10,19 @@
   <style>
     html, body, #root { margin: 0; height: 100%; background: #121212; }
     #status { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 10; font: 12px system-ui, sans-serif; color: #9a9ea8; background: rgba(20, 21, 24, .9); padding: 5px 10px; border-radius: 8px; display: none; }
+    /* the overlay: see-through, with its own bar at the bottom */
+    html.overlay, html.overlay body, html.overlay #root { background: transparent !important; }
+    html.overlay .excalidraw, html.overlay .excalidraw .excalidraw-container { background: transparent !important; }
+    html.overlay .layer-ui__wrapper__footer, html.overlay .layer-ui__wrapper__footer-left, html.overlay .layer-ui__wrapper__footer-right { display: none !important; }
+    #ovbar { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 20; display: flex; gap: 8px; align-items: center; white-space: nowrap; width: max-content;
+      background: rgba(20, 21, 24, .92); padding: 8px 10px; border-radius: 12px; box-shadow: 0 8px 30px rgba(0,0,0,.4); font: 13px system-ui, sans-serif; }
+    #ovbar .ovt { color: #c9ccd3; padding: 0 6px; }
+    #ovbar button { font: inherit; color: #e6e7ea; background: #2a2c31; border: 0; border-radius: 8px; padding: 7px 12px; cursor: pointer; }
+    #ovbar button.go { background: #2f7cf6; color: #fff; font-weight: 600; }
+    #ovbar.through { opacity: .55; }
+    #ovbar.through button { display: none; }
+    #showbtn { position: fixed; right: 18px; bottom: 80px; z-index: 20; display: none; font: 600 13px system-ui, sans-serif; color: #fff;
+      background: #2f7cf6; border: 0; border-radius: 10px; padding: 9px 14px; cursor: pointer; box-shadow: 0 6px 20px rgba(0,0,0,.35); }
   </style>
   <!-- Excalidraw loads its fonts from here -->
   <script>window.EXCALIDRAW_ASSET_PATH = 'https://esm.sh/@excalidraw/excalidraw@0.18.1/dist/prod/';</script>

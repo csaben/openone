@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, screen, powerMonitor, globalShortcut, Notification, Tray, Menu, nativeImage, nativeTheme, shell, clipboard } = require('electron');
+const { app, BrowserWindow, ipcMain, screen, powerMonitor, globalShortcut, Notification, Tray, Menu, nativeImage, nativeTheme, shell, clipboard, desktopCapturer } = require('electron');
 const { execFileSync, spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
@@ -336,7 +336,8 @@ function menuTemplate() {
     { label: cfg.hotkey ? `Open panel  (${cfg.hotkey.replace('Control', 'Ctrl')})` : 'Open panel', click: toggle },
     { type: 'separator' },
     ...(cfg.server ? [
-      { label: cfg.boardHotkey ? `Whiteboard  (${cfg.boardHotkey.replace('Control', 'Ctrl')})` : 'Whiteboard', click: () => openBoard() },
+      { label: `Whiteboard${keyLabel(boardKey())}`, click: () => toggleBoard() },
+      { label: `Draw on screen${keyLabel(overlayKey())}`, click: () => toggleOverlay() },
       { label: 'Send clipboard to phone', click: () => sendClipboard().catch((e) => note("Couldn't send", e.message)) },
       { type: 'separator' },
     ] : []),
@@ -427,7 +428,14 @@ app.whenReady().then(() => {
     push();
   });
   ipcMain.on('pane:seen', (_e, key) => { monitor.markSeen(key); push(); tellServer(key); });
-  if (cfg.server && cfg.boardHotkey) { try { globalShortcut.register(cfg.boardHotkey, () => openBoard()); } catch {} }
+  if (cfg.server) {
+    for (const [key, fn] of [[boardKey(), toggleBoard], [overlayKey(), toggleOverlay]]) {
+      if (!key) continue;
+      let ok = false;
+      try { ok = globalShortcut.register(key, fn); } catch {}
+      if (!ok) note(`openone: ${key} is taken`, 'Another app has that shortcut. Change "boardHotkey" / "overlayHotkey" in the config.');
+    }
+  }
   if (cfg.server) { pollMessages(); pollDrops(); sendToShortcut(); sendFilesFromArgs(process.argv); }
 });
 
@@ -458,6 +466,21 @@ function tellServer(key) {
 
 let boardWin = null;
 // quiet: an agent drew and nobody had it open; show it without taking the keyboard
+// hotkeys: "boardHotkey" / "overlayHotkey" in the config ("" turns one off)
+const boardKey = () => (cfg.boardHotkey ?? 'Control+Shift+B');
+const overlayKey = () => (cfg.overlayHotkey ?? 'Control+Shift+D');
+const keyLabel = (k) => (k ? `  (${k.replace('Control', 'Ctrl')})` : '');
+
+// the hotkey: show it, or hide it when it's what you're looking at
+function toggleBoard() {
+  if (boardWin && !boardWin.isDestroyed() && boardWin.isVisible() && boardWin.isFocused()) { boardWin.hide(); return; }
+  openBoard();
+}
+
+function boardPrefs() {
+  return { contextIsolation: true, nodeIntegration: false, preload: path.join(__dirname, 'board-preload.js') };
+}
+
 function openBoard(quiet = false) {
   if (!cfg.server) return;
   if (boardWin && !boardWin.isDestroyed()) {
@@ -469,7 +492,7 @@ function openBoard(quiet = false) {
   boardWin = new BrowserWindow({
     width: Math.round(area.width * 0.75), height: Math.round(area.height * 0.8), title: 'openone board', show: false,
     backgroundColor: '#121212', autoHideMenuBar: true, icon: path.join(ASSETS, 'app-256.png'),
-    webPreferences: { contextIsolation: true, nodeIntegration: false },
+    webPreferences: boardPrefs(),
   });
   boardWin.loadURL(`${serverUrl()}/board`);
   boardWin.once('ready-to-show', () => { if (quiet) boardWin.showInactive(); else boardWin.show(); });
@@ -477,6 +500,94 @@ function openBoard(quiet = false) {
   boardWin.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:/.test(url)) shell.openExternal(url); return { action: 'deny' }; });
   boardWin.on('closed', () => { boardWin = null; });
 }
+
+// ---------- drawing on the screen ----------
+//
+// The hotkey takes a screenshot of the screen under the mouse, then lays the board over
+// that screen, transparent, at a fresh spot to the right of everything on it, at 1 board
+// unit per screen pixel. You draw on your screen; it's the board. Done pins the
+// screenshot underneath your marks, so the board keeps both, lined up. Click-through
+// leaves the marks showing while the mouse goes to the apps below; the hotkey brings
+// the pen back. "Show on screen" on a pinned screenshot opens the overlay over that
+// region instead, with the screenshot itself hidden, so its marks sit on the live screen.
+// The window only exists while it's up: a full-screen transparent window costs the apps
+// underneath repaints.
+
+let overlay = null; // { win, mode: 'draw' | 'through', shot: nativeImage | null, region }
+
+async function toggleOverlay() {
+  if (!cfg.server) return;
+  if (!overlay) return openOverlay().catch((e) => note("Couldn't open the overlay", e.message));
+  if (overlay.mode === 'through') return overlayMode('draw');
+  return finishOverlay('done');
+}
+
+async function openOverlay(region = null) {
+  const d = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+  let shot = null;
+  if (!region) {
+    const sources = await desktopCapturer.getSources({
+      types: ['screen'], thumbnailSize: { width: Math.round(d.bounds.width * d.scaleFactor), height: Math.round(d.bounds.height * d.scaleFactor) },
+    });
+    const src = sources.find((x) => x.display_id === String(d.id)) || sources[0];
+    shot = src ? src.thumbnail : null;
+    const scene = await (await fetch(`${serverUrl()}/api/board`, { signal: AbortSignal.timeout(8000) })).json();
+    const live = (scene.elements || []).filter((e) => !e.isDeleted);
+    region = {
+      x: live.length ? Math.round(Math.max(...live.map((e) => e.x + (e.width || 0))) + 240) : 0,
+      y: live.length ? Math.round(Math.min(...live.map((e) => e.y))) : 0,
+    };
+  }
+  region = { ...region, w: d.bounds.width, h: d.bounds.height };
+  const win = new BrowserWindow({
+    ...d.bounds, frame: false, transparent: true, backgroundColor: '#00000000', alwaysOnTop: true, skipTaskbar: true,
+    type: 'toolbar', resizable: false, movable: false, hasShadow: false, fullscreenable: false, show: false, webPreferences: boardPrefs(),
+  });
+  win.setAlwaysOnTop(true, 'screen-saver');
+  win.setBounds(d.bounds);
+  overlay = { win, mode: 'draw', shot, region };
+  const q = new URLSearchParams({ overlay: '1', x: region.x, y: region.y, w: region.w, h: region.h, ...(region.hide ? { hide: region.hide } : {}) });
+  win.loadURL(`${serverUrl()}/board?${q}`);
+  win.once('ready-to-show', () => { win.show(); win.focus(); });
+  win.on('closed', () => { if (overlay && overlay.win === win) overlay = null; });
+}
+
+function overlayMode(mode) {
+  if (!overlay) return;
+  overlay.mode = mode;
+  overlay.win.setIgnoreMouseEvents(mode === 'through', { forward: true });
+  if (mode === 'draw') overlay.win.focus();
+  overlay.win.webContents.send('board:mode', mode);
+}
+
+// done: pin the screenshot (if this overlay took one) under the marks; discard: undo them
+async function finishOverlay(action) {
+  const o = overlay;
+  if (!o) return;
+  overlay = null;
+  try {
+    const name = new Date().toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+    const arg = action === 'discard' ? { discard: true }
+      : { name: `Screen · ${name}`, shot: o.shot ? `data:image/jpeg;base64,${o.shot.toJPEG(82).toString('base64')}` : null };
+    await o.win.webContents.executeJavaScript(`window.ooOverlayFinish(${JSON.stringify(arg)})`);
+  } catch (e) {
+    note('The overlay didn’t save', e.message);
+  }
+  o.win.destroy();
+}
+
+ipcMain.handle('board:overlay', (_e, action) => {
+  if (action === 'through') overlayMode('through');
+  else if (action === 'done' || action === 'discard') finishOverlay(action);
+});
+
+ipcMain.handle('board:show-on-screen', (_e, r) => {
+  if (!r || ![r.x, r.y].every(Number.isFinite)) return;
+  if (overlay) overlay.win.destroy();
+  overlay = null;
+  if (boardWin && !boardWin.isDestroyed()) boardWin.hide();
+  return openOverlay({ x: Math.round(r.x), y: Math.round(r.y), hide: String(r.hide || '').slice(0, 80) });
+});
 
 // ---------- drops: links, text and files between the phone and this computer ----------
 //

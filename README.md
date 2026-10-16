@@ -125,7 +125,15 @@ Fewer agents lying around, none lost. In the web panel and the app, each idle ag
 
 ### Whiteboard
 
-One shared [Excalidraw](https://excalidraw.com) board, kept by the server at `/board`: open it from the tray (**Whiteboard**), the web panel's ⋯ menu, or the phone. Edits from every open copy merge as you go. Set `"boardHotkey": "Control+Alt+B"` in the desktop config for a global shortcut.
+One shared [Excalidraw](https://excalidraw.com) board, kept by the server at `/board`: open it from the tray (**Whiteboard**), the web panel's ⋯ menu, or the phone. Edits from every open copy merge as you go.
+
+On the desktop:
+
+- **Ctrl+Shift+B** shows or hides the board window.
+- **Ctrl+Shift+D** draws on the screen. It takes a screenshot of the screen under the mouse, then lays the board over that screen, transparent, at a fresh spot beside everything else on it (1 board unit per screen pixel), with the pen ready. **Done** pins the screenshot under your marks, labelled with the time, so the board keeps both lined up. **Click-through** leaves the marks showing while the mouse goes to the apps underneath; the hotkey brings the pen back. **Discard** takes the marks back. The overlay window only exists while it's up.
+- **Show on screen**: select a pinned screenshot on the board, and its region opens as the overlay with the screenshot hidden, so its marks sit on your live screen again.
+
+`"boardHotkey"` and `"overlayHotkey"` in the desktop config change the shortcuts (`""` turns one off).
 
 Agents share it through three MCP tools:
 

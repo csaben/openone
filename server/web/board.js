@@ -16,6 +16,16 @@ const opsSeen = new Set();
 let syncTimer = null;
 let snapTimer = null;
 
+// Overlay mode (the desktop app's "draw on screen"): transparent, over one screen, showing
+// the board region at (x, y), 1 board unit per screen pixel. `hide` is a pinned screenshot
+// to leave out, so its marks sit on the live screen instead.
+const params = new URLSearchParams(location.search);
+const OVERLAY = params.get('overlay') === '1'
+  ? { x: Number(params.get('x')) || 0, y: Number(params.get('y')) || 0, w: Number(params.get('w')) || 0, h: Number(params.get('h')) || 0, hide: params.get('hide') || '' }
+  : null;
+const shown = (els) => (OVERLAY && OVERLAY.hide ? els.filter((e) => e.id !== OVERLAY.hide) : els);
+const mine = new Set(); // elements this page created (what Discard takes back)
+
 async function call(method, url, body) {
   const r = await fetch(url, {
     method, headers: body ? { 'content-type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined,
@@ -45,6 +55,7 @@ function scheduleSync() {
 async function sync() {
   if (!api) return;
   const els = api.getSceneElementsIncludingDeleted().filter((e) => sentVersions.get(e.id) !== e.version);
+  for (const e of els) if (!sentVersions.has(e.id)) mine.add(e.id);
   const files = {};
   for (const [id, f] of Object.entries(api.getFiles())) if (!sentFiles.has(id)) files[id] = f;
   if (!els.length && !Object.keys(files).length) return;
@@ -84,7 +95,7 @@ async function pull() {
   const remote = restoreElements(s.elements, null);
   const merged = reconcileElements(api.getSceneElementsIncludingDeleted(), remote, api.getAppState());
   remember(remote);
-  api.updateScene({ elements: merged, captureUpdate: CaptureUpdateAction.NEVER });
+  api.updateScene({ elements: shown(merged), captureUpdate: CaptureUpdateAction.NEVER });
   const newFiles = Object.values(s.files || {}).filter((f) => !api.getFiles()[f.id]);
   if (newFiles.length) { api.addFiles(newFiles); for (const f of newFiles) sentFiles.add(f.id); }
   for (const op of s.ops || []) if (!opsSeen.has(op.id)) drawOp(op);
@@ -161,6 +172,16 @@ const initial = call('GET', 'api/board').then((s) => {
   const elements = restoreElements(s.elements, null);
   remember(elements);
   for (const id of Object.keys(s.files || {})) sentFiles.add(id);
+  if (OVERLAY) {
+    // clear canvas, light theme (dark inverts colors), red pen, locked to the region
+    return {
+      elements: shown(elements), files: s.files,
+      appState: {
+        theme: 'light', viewBackgroundColor: 'transparent', scrollX: -OVERLAY.x, scrollY: -OVERLAY.y, zoom: { value: 1 },
+        currentItemStrokeColor: '#e03131', currentItemStrokeWidth: 2, currentItemRoughness: 0,
+      },
+    };
+  }
   setTimeout(() => { for (const op of s.ops || []) drawOp(op); }, 500);
   // dark mode inverts the canvas, so a white background shows as near-black
   return { elements, files: s.files, appState: { theme: 'dark', viewBackgroundColor: '#ffffff' }, scrollToContent: true };
@@ -169,8 +190,8 @@ const initial = call('GET', 'api/board').then((s) => {
 function App() {
   return h(Excalidraw, {
     initialData: initial,
-    excalidrawAPI: (a) => { api = a; },
-    onChange: () => scheduleSync(),
+    excalidrawAPI: (a) => { api = a; window.ooBoardApi = a; if (OVERLAY) setTimeout(() => a.setActiveTool({ type: 'freedraw' }), 300); },
+    onChange: (elements, appState) => { scheduleSync(); if (OVERLAY) lockView(appState); else watchSelection(elements, appState); },
     UIOptions: { canvasActions: { loadScene: false, saveToActiveFile: false } },
   }, h(MainMenu, null,
     h(MainMenu.DefaultItems.Export),
@@ -182,5 +203,76 @@ function App() {
     h(MainMenu.DefaultItems.Help)));
 }
 
+// ---------- overlay ----------
+
+// keep the overlay's view on its region, whatever scrolling or zooming happens
+function lockView(a) {
+  if (a.scrollX === -OVERLAY.x && a.scrollY === -OVERLAY.y && a.zoom.value === 1) return;
+  setTimeout(() => api.updateScene({ appState: { scrollX: -OVERLAY.x, scrollY: -OVERLAY.y, zoom: { value: 1 } }, captureUpdate: CaptureUpdateAction.NEVER }), 0);
+}
+
+function overlayBar() {
+  document.documentElement.classList.add('overlay');
+  const bar = document.createElement('div');
+  bar.id = 'ovbar';
+  bar.innerHTML = '<span class="ovt">Drawing on screen</span><button data-a="done" class="go">Done · pin to board</button><button data-a="through">Click-through</button><button data-a="discard">Discard</button>';
+  bar.addEventListener('click', (e) => { const b = e.target.closest('button'); if (b && window.ooDesk) window.ooDesk.overlay(b.dataset.a); });
+  document.body.appendChild(bar);
+  if (window.ooDesk) {
+    window.ooDesk.onMode((mode) => {
+      bar.classList.toggle('through', mode === 'through');
+      bar.querySelector('.ovt').textContent = mode === 'through' ? 'Click-through · Ctrl+Shift+D to draw' : 'Drawing on screen';
+    });
+  }
+}
+
+// the desktop app calls this before it closes the overlay
+window.ooOverlayFinish = async ({ discard, shot, name } = {}) => {
+  clearTimeout(syncTimer);
+  const all = api.getSceneElementsIncludingDeleted();
+  if (discard) {
+    api.updateScene({
+      elements: all.map((e) => (mine.has(e.id) && !e.isDeleted
+        ? { ...e, isDeleted: true, version: e.version + 1, versionNonce: Math.floor(Math.random() * 2 ** 31), updated: Date.now() } : e)),
+      captureUpdate: CaptureUpdateAction.NEVER,
+    });
+  } else if (shot) {
+    // the screenshot goes underneath (first in the scene), the label above the region
+    const fileId = `shot-${Date.now().toString(36)}`;
+    api.addFiles([{ id: fileId, mimeType: 'image/jpeg', dataURL: shot, created: Date.now() }]);
+    const [img, label] = convertToExcalidrawElements([
+      { type: 'image', x: OVERLAY.x, y: OVERLAY.y, width: OVERLAY.w, height: OVERLAY.h, fileId, locked: true, status: 'saved' },
+      { type: 'text', x: OVERLAY.x, y: OVERLAY.y - 44, text: name || 'Screen', fontSize: 24, strokeColor: '#868e96' },
+    ]);
+    api.updateScene({ elements: [img, ...all, label], captureUpdate: CaptureUpdateAction.IMMEDIATELY });
+  }
+  await new Promise((r) => setTimeout(r, 60)); // let Excalidraw settle the new order
+  await sync();
+  return true;
+};
+
+// ---------- the board window: put a pinned screenshot's region back on the screen ----------
+
+let showBtn = null;
+function watchSelection(elements, appState) {
+  if (!window.ooDesk) return;
+  const ids = Object.keys(appState.selectedElementIds || {}).filter((k) => appState.selectedElementIds[k]);
+  const img = ids.length === 1 ? elements.find((e) => e.id === ids[0] && e.type === 'image' && !e.isDeleted) : null;
+  if (!showBtn) {
+    showBtn = document.createElement('button');
+    showBtn.id = 'showbtn';
+    showBtn.textContent = 'Show on screen';
+    showBtn.title = 'Put this screenshot’s marks back over your screen';
+    document.body.appendChild(showBtn);
+    showBtn.addEventListener('click', () => {
+      const e = showBtn.target;
+      if (e) window.ooDesk.showOnScreen({ x: e.x, y: e.y, w: e.width, h: e.height, hide: e.id });
+    });
+  }
+  showBtn.target = img;
+  showBtn.style.display = img ? 'block' : 'none';
+}
+
+if (OVERLAY) overlayBar();
 createRoot(document.getElementById('root')).render(h(App));
 initial.then(listen).catch((e) => status(`Couldn't load the board: ${e.message}`, 0));
