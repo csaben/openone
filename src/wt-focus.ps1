@@ -12,6 +12,31 @@ public static class OoWin {
   [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
   [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
   [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, IntPtr p);
+  [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
+  [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint a, uint b, bool attach);
+  [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr h);
+  [DllImport("user32.dll")] public static extern IntPtr SetFocus(IntPtr h);
+  [DllImport("user32.dll")] public static extern IntPtr SetActiveWindow(IntPtr h);
+
+  // Windows only lets the foreground app hand over focus. Joining the input queue of the
+  // window that has it (the openone dock, a topmost tool window) makes this thread count
+  // as that app for a moment, so the terminal really gets the keyboard, not just raised.
+  public static bool Activate(IntPtr h) {
+    IntPtr fg = GetForegroundWindow();
+    uint fgThread = GetWindowThreadProcessId(fg, IntPtr.Zero);
+    uint me = GetCurrentThreadId();
+    bool joined = fgThread != 0 && fgThread != me && AttachThreadInput(me, fgThread, true);
+    try {
+      BringWindowToTop(h);
+      SetForegroundWindow(h);
+      SetActiveWindow(h);
+      SetFocus(h);
+    } finally {
+      if (joined) AttachThreadInput(me, fgThread, false);
+    }
+    return GetForegroundWindow() == h;
+  }
 }
 "@
 $AE = [System.Windows.Automation.AutomationElement]
@@ -33,7 +58,7 @@ function Raise($w) {
   # a synthetic Alt tap lifts the foreground lock so SetForegroundWindow is honoured
   [OoWin]::keybd_event(0x12, 0, 0, [UIntPtr]::Zero)
   [OoWin]::keybd_event(0x12, 0, 2, [UIntPtr]::Zero)
-  [OoWin]::SetForegroundWindow($h) | Out-Null
+  if (-not [OoWin]::Activate($h)) { Start-Sleep -Milliseconds 80; [OoWin]::Activate($h) | Out-Null }
 }
 
 function Reply($obj) { [Console]::Out.WriteLine((ConvertTo-Json -Compress -Depth 4 -InputObject $obj)); [Console]::Out.Flush() }
