@@ -226,6 +226,7 @@
       ? `<button data-a="mute">${muted ? 'Unmute' : 'Mute'} notifications</button>`
       : '<button data-a="notify">Enable notifications</button>';
     menu.innerHTML = `<button data-a="project">Start or continue a project…</button>
+      <button data-a="next">What's next? (suggestions)…</button>
       <button data-a="new">New session…</button>
       <button data-a="shells">${showShells ? 'Hide' : 'Show'} shells</button>${notif}${window.OOApp ? '<button data-a="server">Server address…</button>' : ''}`;
     menu.classList.toggle('show');
@@ -239,6 +240,7 @@
     if (a === 'mute') { muted = !muted; store.set('muted', muted); emitState(); }
     if (a === 'notify') Notification.requestPermission();
     if (a === 'new') newSession();
+    if (a === 'next') nextSheet();
     if (a === 'project' && window.ooProjects) window.ooProjects();
     if (a === 'server' && window.OOApp) window.OOApp.changeServer(); // the Android app
   });
@@ -246,6 +248,49 @@
   document.addEventListener('click', (e) => {
     if (!e.target.closest('#webmenu') && !e.target.closest('#b-more')) menu.classList.remove('show');
   });
+
+  // Ask Codex what to do next in a project; the suggestions come back as an ask
+  // (a notification with Start buttons). Projects with agents, or asleep ones, first.
+  async function nextSheet() {
+    sheet.innerHTML = '<div class="bar"><b>What&rsquo;s next?</b><span class="sp"></span><button data-close>✕</button></div><div class="nx-wait">Loading projects…</div>';
+    viewing = null;
+    sheet.classList.add('show');
+    let st;
+    let all;
+    try { [st, all] = await Promise.all([call('GET', 'api/suggest'), call('GET', 'api/projects')]); } catch (err) { toast(err.message); return; }
+    const key = (h, f) => `${h}|${f}`;
+    const active = new Set(st.active.map((x) => key(x.host, x.folder)));
+    const rows = all.flatMap((h) => h.dirs.map((d) => ({ host: h.host, folder: d.name, about: d.about || '' })))
+      .sort((a, b) => Number(active.has(key(b.host, b.folder))) - Number(active.has(key(a.host, a.folder))));
+    const when = (k) => {
+      if (st.running === k) return 'Codex is looking now…';
+      if (st.queued.includes(k)) return 'In line…';
+      const l = st.latest[k];
+      if (!l) return '';
+      const ago = Math.round((Date.now() - l.at) / 60000);
+      return l.error ? `Failed: ${l.error}` : `Last asked ${ago < 60 ? `${ago}m` : ago < 1440 ? `${Math.round(ago / 60)}h` : `${Math.round(ago / 1440)}d`} ago`;
+    };
+    const esc2 = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const list = (q) => rows.filter((r) => !q || `${r.folder} ${r.about}`.toLowerCase().includes(q.toLowerCase())).slice(0, 60).map((r) => {
+      const k = key(r.host, r.folder);
+      return `<button class="nx-row" data-h="${esc2(r.host)}" data-f="${esc2(r.folder)}"><span class="nx-top">${active.has(k) ? '<i class="nx-dot"></i>' : ''}<b>${esc2(r.folder)}</b><span class="nx-host">${esc2(r.host)}</span></span>
+        <span class="nx-sub">${esc2(when(k) || r.about.slice(0, 120))}</span></button>`;
+    }).join('') || '<div class="nx-wait">No matching projects</div>';
+    sheet.innerHTML = `<div class="bar"><b>What's next?</b><span class="sp"></span><button data-close>✕</button></div>
+      <div class="nx-help">Codex reads the project (commits, uncommitted work, README, what its agents last said) and sends up to 3 next steps as a notification. Tap <b>Start</b> on one to begin it.</div>
+      <div class="send"><input id="nx-q" placeholder="Find a project" autocomplete="off"></div><div class="nx-list">${list('')}</div>`;
+    const box = sheet.querySelector('.nx-list');
+    sheet.querySelector('#nx-q').addEventListener('input', (e) => { box.innerHTML = list(e.target.value); });
+    box.addEventListener('click', async (e) => {
+      const b = e.target.closest('.nx-row');
+      if (!b) return;
+      try {
+        const r = await call('POST', 'api/suggest', { host: b.dataset.h, folder: b.dataset.f });
+        toast(r.position ? `Queued (${r.position} ahead). You'll get a notification.` : `Codex is looking at ${b.dataset.f}. You'll get a notification in a few minutes.`);
+        closeSheet();
+      } catch (err) { toast(err.message); }
+    });
+  }
 
   function newSession() {
     const hostOpts = last.hosts.map((h) => `<option${h.ok ? '' : ' disabled'}>${h.name}</option>`).join('');

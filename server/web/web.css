@@ -114,3 +114,14 @@ body.web #toast { position: fixed; bottom: 20px; right: 50%; transform: translat
 }
 #sheet .ask button:active { background: #2f7cf6; }
 #sheet pre.raw { font-family: ui-monospace, var(--mono); }
+
+/* "What's next?" sheet */
+.nx-help { color: #8d919a; font-size: 12.5px; line-height: 1.45; padding: 0 4px 10px; }
+.nx-list { flex: 1; overflow: auto; margin-top: 10px; display: flex; flex-direction: column; gap: 2px; }
+.nx-row { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; text-align: left; padding: 10px 10px; border-radius: 10px; color: #eeeff1; }
+.nx-row:hover, .nx-row:active { background: #17181c; }
+.nx-top { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.nx-host { color: #6c707a; font-size: 12px; }
+.nx-sub { color: #8d919a; font-size: 12px; line-height: 1.35; }
+.nx-dot { width: 7px; height: 7px; border-radius: 50%; background: #3fcf74; display: inline-block; }
+.nx-wait { color: #8d919a; font-size: 13px; padding: 20px 6px; }

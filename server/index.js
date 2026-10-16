@@ -17,6 +17,7 @@ const { Embedder, semantic, projectText } = require('../src/embed');
 const { Bus, names } = require('../src/bus');
 const { Asks, view: askView } = require('../src/asks');
 const { Sleepers, sleepAgent, wakeAgent } = require('../src/sleep');
+const { Suggester, runCodex, buildPrompt, msUntil } = require('../src/suggest');
 
 
 const ROOT = path.join(__dirname, '..');
@@ -46,6 +47,7 @@ const asks = new Asks({
   onChange: () => pushState(),
   // an agent that stopped waiting gets the answer typed into its chat
   onAnswer: (a, delivered) => {
+    if (a.tag && a.tag.startsWith('suggest:')) { startSuggestion(a); return; }
     // (a long-poller between two polls counts as waiting)
     if (delivered || !a.fromKey || Date.now() - (polled.get(a.id) || 0) < 5000) return;
     const text = a.status === 'answered'
@@ -279,6 +281,16 @@ async function api(req, res, parts) {
     }
     if (m === 'DELETE' && !c) { sleepers.take(id); pushState(); return send(res, 200, { ok: true }); }
   }
+  if (a === 'suggest' && !b) {
+    if (m === 'GET') return send(res, 200, { ...suggester.status(), active: await activeProjects().catch(() => []) });
+    if (m === 'POST') {
+      const body = await readJson(req);
+      const h = hosts[String(body.host || '')];
+      if (!h) return send(res, 404, { error: 'no such host' });
+      const folder = projects.checkName(String(body.folder || ''));
+      return send(res, 202, { position: suggester.request({ host: h.cfg.name, folder, manual: true }) });
+    }
+  }
   if (a === 'asks') return asksApi(req, res, b ? decodeURIComponent(b) : '', c);
 
   if (m === 'POST' && a === 'hosts' && b && c === 'snapshot') {
@@ -397,6 +409,88 @@ async function busApi(req, res, what) {
   }
   return send(res, 404, { error: 'not found' });
 }
+
+// ---------- next-step suggestions (src/suggest.js) ----------
+//
+//   POST /api/suggest { host, folder }   ask Codex what to do next there; the answer
+//                                         arrives as an ask with Start buttons
+//   GET  /api/suggest                     running, queued, and the latest per project
+// Config: "suggest": { "at": "08:30", "max": 5, "agent": "claude" } runs it every day at
+// that time for the projects that have (or had, now asleep) agents in them.
+
+const SUGGEST = cfg.suggest || {};
+const base = (s) => String(s || '').replace(/[\\/]+$/, '').split(/[\\/]/).pop();
+// the folder a path is in, compared loosely (slashes, case) across Windows and Linux
+const folderOf = (s) => String(s || '').replace(/\\/g, '/').replace(/\/+$/, '').replace(/\/[^/]*$/, '').toLowerCase();
+
+const suggester = new Suggester({
+  file: path.join(require('os').homedir(), '.local', 'state', 'openone', 'suggestions.json'),
+  run: async (job) => {
+    const h = hosts[job.host];
+    if (!h) throw new Error(`no host ${job.host}`);
+    const root = await h.src.resolve(projects.workspace(h.cfg));
+    const dir = h.src.join(root, projects.checkName(job.folder));
+    const context = await h.src.projectContext(dir);
+    const same = (p) => p.host === job.host && base(p.path).toLowerCase() === job.folder.toLowerCase();
+    const said = [
+      ...monitor.view().filter((p) => p.kind && same(p)),
+      ...sleepers.list.filter(same).map((r) => ({ ...r, asleep: true })),
+    ];
+    const readable = h.cfg.type === 'tmux'; // this machine: Codex can open the folder itself
+    return runCodex({ bin: cfg.codex, cwd: readable ? dir : '', prompt: buildPrompt({ host: job.host, folder: job.folder, context, agents: said, readable }) });
+  },
+  onDone: (job, res) => {
+    const tag = `suggest:${job.host}|${job.folder}`;
+    for (const a of asks.pending().filter((x) => x.tag === tag)) asks.cancel(a.id); // the old ones
+    if (!res.items.length) {
+      if (job.manual) asks.create({ title: `No suggestions for ${job.folder}`, body: res.error || 'Codex found nothing worth starting.', from: `codex · ${job.host}`, ttlSec: 3600 });
+      return;
+    }
+    const a = asks.create({
+      title: `Next for ${job.folder}`, from: `codex · ${job.host}`, tag, project: job.folder, ttlSec: 2 * 86400,
+      body: res.items.map((x, i) => `${i + 1}. ${x.title}\n${x.why}`).join('\n\n'),
+      options: res.items.map((x, i) => ({ id: `s${i + 1}`, label: `Start ${i + 1}` })),
+    });
+    broadcast('ask', askView(a));
+  },
+});
+
+// "Start 2" on a suggestion ask: an agent in that project, with that suggestion's message
+function startSuggestion(a) {
+  const [host, folder] = a.tag.slice('suggest:'.length).split('|');
+  const res = suggester.latest[`${host}|${folder}`];
+  const item = res && res.items[Number(String(a.answer).slice(1)) - 1];
+  const h = hosts[host];
+  if (!item || !h) return;
+  projects.start(h, cfg, { folder, agent: SUGGEST.agent || 'claude', prompt: item.prompt })
+    .then(() => refresh(h)).catch((e) => console.error('suggestion start:', e.message));
+}
+
+// the projects with agents in them (or asleep), as { host, folder }
+async function activeProjects() {
+  const out = new Map();
+  for (const h of Object.values(hosts)) {
+    const root = String(await h.src.resolve(projects.workspace(h.cfg)).catch(() => '')).replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+    const items = [...monitor.view().filter((p) => p.kind && p.host === h.cfg.name), ...sleepers.list.filter((r) => r.host === h.cfg.name)];
+    for (const p of items) {
+      if (!p.path || folderOf(p.path) !== root) continue;
+      out.set(`${h.cfg.name}|${base(p.path)}`, { host: h.cfg.name, folder: base(p.path) });
+    }
+  }
+  return [...out.values()];
+}
+
+function scheduleSuggestions() {
+  const ms = msUntil(SUGGEST.at);
+  if (ms < 0) return;
+  setTimeout(async () => {
+    try {
+      for (const job of (await activeProjects()).slice(0, SUGGEST.max || 5)) suggester.request(job);
+    } catch (e) { console.error('suggestions:', e.message); }
+    scheduleSuggestions();
+  }, ms);
+}
+scheduleSuggestions();
 
 // ---------- asks: questions for you (src/asks.js) ----------
 //

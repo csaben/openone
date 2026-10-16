@@ -24,6 +24,26 @@ const FMT = FIELDS.map((f) => `#{${f}}`).join(SEP);
 const SESSION_NAME = /^[A-Za-z0-9_.-]{1,40}$/;
 const NOTE_FILES = ['README.md', 'readme.md', 'AGENTS.md', 'CLAUDE.md', 'package.json', 'pyproject.toml'];
 const NOTE_BYTES = 1200;
+const CONTEXT_BYTES = 3000;
+
+// "@@LOG ... @@STATUS ... @@README ... @@END" -> [log, status, readme]
+function splitContext(out) {
+  const text = String(out).replace(/\r/g, '');
+  const part = (name, next) => {
+    const a = text.indexOf(`@@${name}\n`);
+    const b = text.indexOf(`@@${next}`, a + 1);
+    return a < 0 || b < 0 ? '' : text.slice(a + name.length + 3, b).trim();
+  };
+  return [part('LOG', 'STATUS'), part('STATUS', 'README'), part('README', 'END')];
+}
+
+function contextText(log, status, readme) {
+  return [
+    `Recent commits (newest first):\n${log.trim() || '(none, or not a git repo)'}`,
+    `Uncommitted changes:\n${status.trim() || '(none)'}`,
+    `README (start):\n${readme.trim() || '(none)'}`,
+  ].join('\n\n');
+}
 
 function parseRow(line) {
   const v = line.replace(/\r$/, '').split(SEP);
@@ -338,6 +358,24 @@ class LocalSource extends TmuxSource {
     return out.join('\n');
   }
 
+  // what a project is up to, for next-step suggestions: recent commits, uncommitted
+  // changes and the start of its README
+  async projectContext(dir) {
+    const fs = require('fs');
+    const path = require('path');
+    const git = (args) => new Promise((resolve) => {
+      execFile('git', ['-C', dir, ...args], { windowsHide: true, timeout: 10000, encoding: 'utf8', maxBuffer: 4 << 20 }, (err, out) => resolve(err ? '' : out));
+    });
+    const log = await git(['log', '-20', '--format=%h %ar %s']);
+    const status = (await git(['status', '--short'])).split('\n').slice(0, 30).join('\n');
+    let readme = '';
+    for (const f of NOTE_FILES) {
+      readme = await fs.promises.readFile(path.join(dir, f), 'utf8').then((t) => t.slice(0, CONTEXT_BYTES)).catch(() => '');
+      if (readme) break;
+    }
+    return contextText(log, status, readme);
+  }
+
   // [{ name, mtime }] for the folders in dir, newest first
   async listDirs(dir) {
     const fs = require('fs');
@@ -512,6 +550,12 @@ class SshTmuxSource extends ShellSource {
     return this.exec([`cd ${sq(root)} 2>/dev/null && for d in */; do d=\${d%/}; case "$d" in .*) continue;; esac; echo "@@$d"; for f in ${files}; do [ -f "$f" ] && { head -c ${NOTE_BYTES} "$f"; echo; break; }; done; done`]);
   }
 
+  async projectContext(dir) {
+    const files = NOTE_FILES.map((f) => `"${f}"`).join(' ');
+    const out = await this.exec([`cd ${sq(dir)} 2>/dev/null && { echo @@LOG; git log -20 --format='%h %ar %s' 2>/dev/null; echo @@STATUS; git status --short 2>/dev/null | head -30; echo @@README; for f in ${files}; do [ -f "$f" ] && { head -c ${CONTEXT_BYTES} "$f"; break; }; done; echo; echo @@END; }`], 30000);
+    return contextText(...splitContext(out));
+  }
+
   async listDirs(dir) {
     const root = await this.resolve(dir);
     const out = await this.exec([`find ${sq(root)} -mindepth 1 -maxdepth 1 -type d -not -name '.*' -printf '@@%T@ %f\\n' 2>/dev/null`]);
@@ -583,6 +627,18 @@ class SshPsmuxSource extends ShellSource {
     return this.clean(await this.exec([`${POWERSHELL} -NoLogo -NoProfile -NonInteractive -EncodedCommand ${enc} < NUL`], 30000));
   }
 
+  async projectContext(dir) {
+    if (/["'\r\n%]/.test(dir)) throw new Error('bad path');
+    const files = NOTE_FILES.map((f) => `'${f}'`).join(',');
+    const ps = `Set-Location -LiteralPath '${dir}'; '@@LOG'; git log -20 --format='%h %ar %s' 2>$null; '@@STATUS'; ` +
+      "git status --short 2>$null | Select-Object -First 30; '@@README'; " +
+      `foreach ($f in @(${files})) { if (Test-Path -LiteralPath $f) { $t = [IO.File]::ReadAllText((Resolve-Path -LiteralPath $f)); ` +
+      `$t.Substring(0, [Math]::Min(${CONTEXT_BYTES}, $t.Length)); break } }; '@@END'`;
+    const enc = Buffer.from(ps, 'utf16le').toString('base64');
+    const out = this.clean(await this.exec([`${POWERSHELL} -NoLogo -NoProfile -NonInteractive -EncodedCommand ${enc} < NUL`], 30000));
+    return contextText(...splitContext(out));
+  }
+
   async listDirs(dir) {
     const root = await this.resolve(dir);
     if (/["\r\n%]/.test(root)) throw new Error('bad workspace path');
@@ -614,4 +670,4 @@ function createSource(cfg) {
   return new LocalSource(cfg);
 }
 
-module.exports = { createSource, LocalSource, SshTmuxSource, SshPsmuxSource, parseRow, hexChunks, FMT };
+module.exports = { createSource, LocalSource, SshTmuxSource, SshPsmuxSource, parseRow, hexChunks, FMT, splitContext, contextText };
