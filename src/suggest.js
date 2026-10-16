@@ -64,13 +64,14 @@ function runCodex({ bin, cwd, prompt, timeoutMs = 8 * 60000 }) {
   const args = ['exec', '--sandbox', 'read-only', '--ephemeral', '--skip-git-repo-check', '--color', 'never',
     '-C', cwd || tmp, '--output-schema', schema, '-o', out, prompt];
   const run = (b) => new Promise((resolve, reject) => {
-    execFile(b, args, { timeout: timeoutMs, maxBuffer: 32 << 20, windowsHide: true, encoding: 'utf8' }, (err, stdout, stderr) => {
+    const child = execFile(b, args, { timeout: timeoutMs, maxBuffer: 32 << 20, windowsHide: true, encoding: 'utf8' }, (err, stdout, stderr) => {
       if (err && err.code === 'ENOENT') return reject(err);
       let j = null;
       try { j = JSON.parse(fs.readFileSync(out, 'utf8')); } catch {}
       if (j && Array.isArray(j.items)) return resolve(j);
       reject(new Error(err ? String(stderr || err.message).trim().split('\n').pop() : 'codex returned no suggestions'));
     });
+    child.stdin.end(); // an open stdin makes codex exec wait for more prompt
   });
   const fallback = path.join(os.homedir(), '.local', 'bin', process.platform === 'win32' ? 'codex.exe' : 'codex');
   return run(bin || 'codex')
