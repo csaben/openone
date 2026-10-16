@@ -108,7 +108,11 @@ function guard() {
 function createWindow() {
   win = new BrowserWindow({
     width: SIZES.tab[0], height: SIZES.tab[1], frame: false, transparent: true, resizable: false, movable: false,
-    skipTaskbar: true, alwaysOnTop: true, hasShadow: false, show: false, backgroundColor: '#00000000',
+    // 'toolbar' makes it a Windows tool window, which never gets a taskbar button.
+    // skipTaskbar alone only removes the button once, and Windows brings it back
+    // (blank icon, flashing whenever focus() is refused).
+    type: 'toolbar', skipTaskbar: true, alwaysOnTop: true, hasShadow: false, show: false, backgroundColor: '#00000000',
+    icon: path.join(ASSETS, 'app-256.png'),
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, backgroundThrottling: false },
   });
   win.setAlwaysOnTop(true, 'screen-saver');
@@ -344,6 +348,7 @@ function toggle() {
   win.show();
   win.focus();
   win.webContents.focus();
+  win.flashFrame(false);
   win.webContents.send('expand');
 }
 
@@ -383,7 +388,7 @@ app.whenReady().then(() => {
 
   ipcMain.on('ui:size', (_e, s) => { if (SIZES[s] && s !== size) { size = s; place(); } });
   ipcMain.on('ui:ignore', (_e, ignore) => win.setIgnoreMouseEvents(!!ignore, { forward: true }));
-  ipcMain.on('ui:focus', () => { win.focus(); win.webContents.focus(); });
+  ipcMain.on('ui:focus', () => { win.focus(); win.webContents.focus(); win.flashFrame(false); });
   ipcMain.on('ui:menu', () => Menu.buildFromTemplate(menuTemplate()).popup({ window: win }));
   ipcMain.on('ui:ready', () => { lastState = ''; push(); });
   ipcMain.on('ui:mute', () => { muted = !muted; push(); });
