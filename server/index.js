@@ -200,6 +200,14 @@ async function api(req, res, parts) {
   const m = req.method;
   if (m === 'GET' && a === 'state') return send(res, 200, state());
   if (m === 'GET' && a === 'hosts') return send(res, 200, state().hosts);
+  // POST /api/restart: exit, so the supervisor (systemd Restart=always) starts a fresh one.
+  // The desktop app's "Restart openone" calls this.
+  if (m === 'POST' && a === 'restart') {
+    send(res, 200, { ok: true });
+    console.log('restart requested');
+    setTimeout(() => process.exit(0), 300);
+    return;
+  }
 
   if (m === 'GET' && a === 'projects' && b === 'semantic') {
     if (!embedder) return send(res, 200, { projects: {}, agents: {}, ready: false });

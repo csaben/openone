@@ -38,6 +38,8 @@ On first run it writes `config.json` (to `%APPDATA%\openone` for an installed co
 
 **Ctrl+Alt+Space** opens the panel on the agent list, with the most urgent agent selected. **j**/**k** (or the arrow keys) move, **Enter** jumps to the pane, **Tab** switches to the inbox of waiting and finished agents, **r** replies, **1**–**9** answer a question and **Esc** closes. **/** searches agents by name, host or words from their conversation; arrows or Ctrl+j/k pick a match and **Enter** jumps to it. Set `hotkey` in the config to change the shortcut. The tray menu has mute, start at login and config.
 
+**Restart openone** (on the desktop, and in the tray) cycles the app, and the server too when `"server"` is set: it asks the server to restart (`POST /api/restart`; its supervisor, e.g. systemd with `Restart=always`, brings it back), ends every running copy of the app, even a stuck one, and starts a fresh one.
+
 ### Projects
 
 **n** in the panel starts or continues work in a project folder. Type what you're working on: it matches the folders in each host's `workspace`, or offers a new folder named after what you typed. Add a host name ("drive backup devbox") to pick where it goes. Then choose claude or codex and whether to continue the last chat, and **Enter** opens a new window in the tmux session that host's terminal tab shows, `cd`s into the folder (creating it if new) and starts the agent. **o** opens the folder in VS Code, over Remote-SSH for ssh hosts; **o** on a row of the agent list opens that pane's folder.

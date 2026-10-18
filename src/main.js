@@ -350,6 +350,7 @@ function menuTemplate() {
       click: (item) => app.setLoginItemSettings({ ...loginItem(), openAtLogin: item.checked }),
     },
     { type: 'separator' },
+    { label: 'Restart openone', click: () => restartFromTray() },
     { label: 'Quit openone', click: () => app.quit() },
   ];
 }
@@ -373,12 +374,40 @@ function toggle() {
 // freezing transitions half-way (ghost rail) and dropping frames (flicker).
 app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
 
-if (!app.requestSingleInstanceLock()) app.quit();
+// "Restart openone" (desktop shortcut, tray): openone.exe --restart asks the server to
+// restart, ends every running copy of the app, and starts a fresh one. Works when the
+// running copy is stuck, since nothing here goes through it.
+async function restartAll() {
+  let server = '';
+  try { server = String(JSON.parse(fs.readFileSync(CONFIG, 'utf8')).server || '').replace(/\/$/, ''); } catch {}
+  if (server) {
+    try { await fetch(`${server}/api/restart`, { method: 'POST', signal: AbortSignal.timeout(5000) }); } catch {}
+  }
+  // packaged only: in dev the exe is electron.exe, shared with other apps
+  if (process.platform === 'win32' && app.isPackaged) {
+    const exe = path.basename(process.execPath).replace(/'/g, "''");
+    try {
+      execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+        `Get-CimInstance Win32_Process -Filter "Name='${exe}'" | Where-Object { $_.ProcessId -ne ${process.pid} -and $_.ParentProcessId -ne ${process.pid} } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`],
+      { timeout: 20000, windowsHide: true });
+    } catch {}
+  }
+  await sleep(1500);
+  const args = app.isPackaged ? [] : [path.join(__dirname, '..')];
+  spawn(process.execPath, args, { detached: true, stdio: 'ignore' }).unref();
+  app.exit(0);
+}
+
+const RESTARTING = process.argv.includes('--restart');
+if (RESTARTING) {
+  restartAll();
+} else if (!app.requestSingleInstanceLock()) app.quit();
 // Explorer's "Send to > openone (phone)" starts openone.exe --send-to-phone <files>; when
 // it's already running, that arrives here
 app.on('second-instance', (_e, argv) => sendFilesFromArgs(argv));
 
 app.whenReady().then(() => {
+  if (RESTARTING) return;
   app.setAppUserModelId('com.csaben.openone');
   loadConfig();
   createWindow();
@@ -436,6 +465,7 @@ app.whenReady().then(() => {
       if (!ok) note(`openone: ${key} is taken`, 'Another app has that shortcut. Change "boardHotkey" / "overlayHotkey" in the config.');
     }
   }
+  restartShortcut();
   if (cfg.server) { pollMessages(); pollDrops(); sendToShortcut(); sendFilesFromArgs(process.argv); }
 });
 
@@ -670,6 +700,22 @@ async function sendFilesFromArgs(argv) {
     try { await sendFile(f); } catch (e) { note(`Couldn't send ${path.basename(f)}`, e.message); return; }
   }
   if (files.length) note(`Sent ${files.length === 1 ? path.basename(files[0]) : `${files.length} files`} to your phone`, '');
+}
+
+// "Restart openone" on the desktop: cycles the app and the server when they get slow
+function restartShortcut() {
+  if (!app.isPackaged || process.platform !== 'win32') return;
+  try {
+    const link = path.join(app.getPath('desktop'), 'Restart openone.lnk');
+    shell.writeShortcutLink(link, fs.existsSync(link) ? 'update' : 'create', {
+      target: process.execPath, args: '--restart', description: 'Restart openone (this app and its server)', icon: process.execPath, iconIndex: 0,
+    });
+  } catch {}
+}
+
+function restartFromTray() {
+  const args = app.isPackaged ? ['--restart'] : [path.join(__dirname, '..'), '--restart'];
+  spawn(process.execPath, args, { detached: true, stdio: 'ignore' }).unref();
 }
 
 // Explorer's right-click > Send to > openone (phone)
