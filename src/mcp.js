@@ -141,6 +141,7 @@ const INSTRUCTIONS = 'openone sees every Claude and Codex agent running in tmux/
   'and waits for the tap; use it instead of stopping to wait for the user when one quick decision unblocks you. ' +
   'board_read and board_draw share a whiteboard with the user: read it when they say they drew something for you, draw on it to sketch a diagram for them. ' +
   'A user message that starts with [voice] or [ring] was spoken (push-to-talk, a voice-note ring): answer in text as usual, then also call speak with a short spoken version, since they may be away from the screen. ' +
+  'One tagged "[ring? NN% sure this is for you ...]" may have been a note to self: if it clearly isn\'t for you, call not_for_me with its ref and stop; otherwise answer it. ' +
   'resources shows what is using RAM, CPU and GPU on each host (per pane and per service); sleep and wake put idle agents away and bring them back.';
 
 const TOOLS = [
@@ -261,6 +262,11 @@ TOOLS.push(
     inputSchema: { type: 'object', properties: { name: { type: 'string', description: 'Agent name from roster.' } }, required: ['name'] },
   },
   {
+    name: 'not_for_me',
+    description: 'A voice note that reached you tagged "[ring? NN% sure this is for you ...]" may have been meant for the user\'s notes, not you. Read it; if it clearly isn\'t for you (a thought, a reminder, talk about something unrelated to your work with them), call this with its ref and do nothing else: the notes service files it as a note. If it is for you, or plausibly a follow-up to your conversation, just answer it.',
+    inputSchema: { type: 'object', properties: { ref: { type: 'string', description: 'The ref in the tag, like "r1a2b3".' } }, required: ['ref'] },
+  },
+  {
     name: 'wake',
     description: 'Wake a sleeping agent: open a window in its folder and resume its conversation. Name or id from the "Asleep" list in resources.',
     inputSchema: { type: 'object', properties: { name: { type: 'string', description: 'Its label ("photo-tidy"), label@host, or id.' } }, required: ['name'] },
@@ -345,6 +351,12 @@ async function run(name, a, who) {
   if (name === 'sleep') {
     const r = await call('POST', 'sleep', { name: a.name }, who);
     return `${r.label}@${r.host} is asleep${r.resume ? '' : " (it didn't print a resume id, so wake continues its folder's latest conversation)"}. Wake it with wake "${r.label}".`;
+  }
+  if (name === 'not_for_me') {
+    const r = await fetch(`${URL_}/api/route/not-for-me`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ref: a.ref }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || `openone server: HTTP ${r.status}`);
+    return 'Handed back: it will be filed as a note. Nothing else to do.';
   }
   if (name === 'wake') {
     const r = await call('POST', 'wake', { name: a.name }, who);

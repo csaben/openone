@@ -2,11 +2,16 @@
 // something to keep (the notes service files it) or talk meant for an agent ("check why the
 // build failed", "yeah go ahead"), which openone types into that agent's chat right away.
 //
-// A few spoken cues decide it outright ("note to self ...", "Claude, ..."); anything else
-// goes to a small, fast chat model ("router" in the server config) with the roster. When in
-// doubt, or when the model is down, it's a note: a note is never lost, a message can be.
+// A few spoken cues decide it outright ("note to self ...", "Claude, ..."). Otherwise a
+// scoring model (jev) says how likely the note was meant for an agent, given the recent
+// conversation; the bar is low, because an agent reading a stray note costs little and a
+// missed message costs a repeat. When the score is unsure the agent is told so and decides:
+// not_for_me hands it back to the notes service (the caller's refile URL) to file. Without
+// jev, or when it fails: a note soon after one sent to an agent follows it there, then a
+// small chat model decides, and when that's down too it's a note.
 //
-// router: { url: ".../v1/chat/completions", model, to, timeoutMs, apiKey }
+// router: { to, jev: { url, key, model, threshold, sureAt }, url: ".../v1/chat/completions",
+//           model, apiKey, timeoutMs, stickyMin, confirm }
 //   to: the default agent: a name, a pane key, or a list of them (the first one running wins)
 
 const NOTE_CUES = /^\s*(?:(?:a\s+)?note\s+to\s+self|note|memo|journal)\b[\s,:.-]*/i;
@@ -100,10 +105,60 @@ class Router {
     return '';
   }
 
+  // -> { route, to, why, p } from jev's yes/no score (and which agent, when there are several)
+  async score(text, agents, defaultTo) {
+    const j = this.cfg.jev;
+    const def = agents.find((a) => a.name === defaultTo);
+    const questions = {
+      for_agent: {
+        type: 'noul',
+        instructions: 'The user recorded this voice note on a ring. Was it meant for one of their AI agents (an instruction, a request, a question for it, a reply to what it said, or a follow-up to the recent conversation with it), rather than a private note, thought or reminder for their notes doc?',
+        criteria: { true: 'Talk meant for an agent to read and act on or answer.', false: 'A note to self: a thought, journal entry, idea or reminder, not addressed to an agent.' },
+      },
+    };
+    if (agents.length > 1) {
+      questions.which = {
+        type: 'choice',
+        instructions: 'If the note is meant for an agent, which one? Without a clear sign, the default agent.',
+        criteria: Object.fromEntries(agents.map((a) => [a.name, `${a.title || a.kind}${a.name === defaultTo ? ' (the default agent)' : ''}`])),
+      };
+    }
+    const state = {
+      note: String(text).slice(0, 4000),
+      default_agent: defaultTo || null,
+      default_agent_last_said: def && def.summary ? String(def.summary).slice(0, 600) : null,
+      recent_notes_sent_to_agents: this.recent(),
+    };
+    const r = await fetch(`${String(j.url).replace(/\/+$/, '')}/v1/systemone`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${j.key}` },
+      body: JSON.stringify({ model: j.model || 'jev-latest', state, questions }),
+      signal: AbortSignal.timeout(j.timeoutMs || 5000),
+    });
+    if (!r.ok) throw new Error(`jev HTTP ${r.status}`);
+    const a = (await r.json()).answers || {};
+    const p = a.for_agent && typeof a.for_agent.noul === 'number' ? a.for_agent.noul : null;
+    if (p === null) throw new Error('jev gave no score');
+    const pick = a.which && a.which.confidence >= 0.6 && agents.some((x) => x.name === a.which.choice) ? a.which.choice : defaultTo;
+    const pct = `${Math.round(p * 100)}%`;
+    if (p >= (j.threshold ?? 0.35) && pick) return { route: 'agent', to: pick, why: `jev ${pct}`, p };
+    return { route: 'note', to: '', why: `jev ${pct}`, p };
+  }
+
   async classify(text, agents, defaultTo) {
     const names = agents.map((a) => a.name);
     const c = cue(text);
     if (c) return c.route === 'agent' ? { route: defaultTo ? 'agent' : 'note', to: defaultTo, why: c.why, text: c.text } : { route: 'note', to: '', why: c.why };
+    let jevError = '';
+    if (this.cfg.jev && this.cfg.jev.url && this.cfg.jev.key) {
+      try { return await this.score(text, agents, defaultTo); } catch (e) { jevError = String(e.message || e); }
+    }
+    const out = await this.fallback(text, agents, defaultTo, names);
+    if (jevError) out.why = `${out.why} (${jevError})`;
+    return out;
+  }
+
+  async fallback(text, agents, defaultTo, names) {
     // mid-conversation: a note soon after one that went to an agent goes there too ("note" opts out)
     const last = this.sent[this.sent.length - 1];
     const sticky = (this.cfg.stickyMin ?? 10) * 60000;
@@ -127,8 +182,9 @@ class Router {
     }
   }
 
-  // { text, source } -> { route, to, why, ms, sent? }
-  async route({ text, source = 'ring' }) {
+  // { text, source, refile } -> { route, to, why, p?, ms, sent? }
+  // refile: a URL the caller wants POSTed if the agent says the note wasn't for it
+  async route({ text, source = 'ring', refile = '' }) {
     const t0 = Date.now();
     const clean = String(text || '').trim();
     if (!clean) return { route: 'note', to: '', why: 'empty', ms: 0 };
@@ -136,8 +192,14 @@ class Router {
     const defaultTo = this.defaultTo(agents);
     const out = await this.classify(clean, agents, defaultTo);
     if (out.route === 'agent') {
+      // unsure: say so, and give the agent a way to hand it back
+      let tag = `[${source}]`;
+      if (typeof out.p === 'number' && out.p < (this.cfg.jev && this.cfg.jev.sureAt || 0.75)) {
+        const ref = this.keep(refile);
+        tag = `[${source}? ${Math.round(out.p * 100)}% sure this is for you${ref ? `; if it isn't, call not_for_me with ref "${ref}"` : ''}]`;
+      }
       try {
-        out.sent = this.sendTo(out.to, `[${source}] ${out.text || clean}`);
+        out.sent = this.sendTo(out.to, `${tag} ${out.text || clean}`);
         this.sent.push({ to: out.to, text: out.text || clean, at: Date.now() });
       } catch (e) {
         const failed = { route: 'note', to: '', why: `couldn't send: ${String(e.message || e)}`, ms: Date.now() - t0 };
@@ -148,6 +210,28 @@ class Router {
     delete out.text;
     this.tell(out);
     return { ...out, ms: Date.now() - t0 };
+  }
+
+  // refile URLs for unsure messages, by a short ref, for a day
+  keep(url) {
+    if (!/^https?:\/\//.test(String(url || ''))) return '';
+    this.refiles = (this.refiles || new Map());
+    for (const [k, v] of this.refiles) if (Date.now() - v.at > 86400000) this.refiles.delete(k);
+    const ref = `r${Math.random().toString(36).slice(2, 7)}`;
+    this.refiles.set(ref, { url, at: Date.now() });
+    return ref;
+  }
+
+  // the agent says an unsure message wasn't for it: the notes service files it after all
+  async notForMe(ref) {
+    const r = this.refiles && this.refiles.get(String(ref || '').trim());
+    if (!r) throw Object.assign(new Error(`no message with ref "${ref}" (refs last a day)`), { code: 404 });
+    const res = await fetch(r.url, { method: 'POST', signal: AbortSignal.timeout(10000) });
+    if (!res.ok) throw new Error(`the notes service answered HTTP ${res.status}`);
+    this.refiles.delete(String(ref).trim());
+    this.sent = this.sent.slice(0, -1); // and it doesn't count as the conversation going on
+    if (this.confirm) try { this.confirm('Filed as a note.'); } catch {}
+    return { ok: true };
   }
 }
 

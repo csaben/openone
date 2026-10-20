@@ -69,9 +69,24 @@ setInterval(() => drops.sweep(), 3600000);
 // the shared whiteboard (src/board.js); pages hear "board" on the event stream when it changes
 // agents talking back (speak): audio made by the "tts" service, played by a desktop app
 const speech = new Speech({ synth: httpSynth(cfg.tts) });
-// spoken notes (a ring, a phone): kept as a note, or typed to an agent (src/router.js)
+// spoken notes (a ring, a phone): kept as a note, or typed to an agent (src/router.js).
+// The jev key comes from the environment or the repo's .env (written by a key manager), never
+// the config: "jev": { "urlEnv": "JEV_BASE_URL", "keyEnv": "JEV_API_KEY", ... }
+function routerCfg() {
+  const r = { ...(cfg.router || {}) };
+  if (!r.jev) return r;
+  const env = { ...process.env };
+  try {
+    for (const l of fs.readFileSync(path.join(ROOT, '.env'), 'utf8').split(/\r?\n/)) {
+      const kv = l.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/);
+      if (kv && !(kv[1] in env)) env[kv[1]] = kv[2].replace(/^(['"])(.*)\1$/, '$2');
+    }
+  } catch {}
+  r.jev = { ...r.jev, url: r.jev.url || env[r.jev.urlEnv || 'JEV_BASE_URL'], key: env[r.jev.keyEnv || 'JEV_API_KEY'] };
+  return r;
+}
 const router = new Router({
-  cfg: cfg.router || {},
+  cfg: routerCfg(),
   roster: () => bus.roster(null),
   resolve: (t) => { const p = bus.resolve(t); return p ? bus.names().get(p.key) : ''; },
   confirm: cfg.tts ? (text) => { speech.say({ text, from: 'router' }); pushState(); } : null,
@@ -318,7 +333,11 @@ async function api(req, res, parts) {
   if (a === 'speak') return speakApi(req, res, b ? decodeURIComponent(b) : '', c);
   if (m === 'POST' && a === 'route' && !b) {
     const body = await readJson(req);
-    return send(res, 200, await router.route({ text: body.text, source: String(body.source || 'ring').replace(/[^\w-]/g, '') || 'ring' }));
+    return send(res, 200, await router.route({ text: body.text, source: String(body.source || 'ring').replace(/[^\w-]/g, '') || 'ring', refile: body.refile }));
+  }
+  if (m === 'POST' && a === 'route' && b === 'not-for-me') {
+    const body = await readJson(req);
+    return send(res, 200, await router.notForMe(body.ref));
   }
   if (a === 'drops' || (m === 'GET' && a === 'devices')) return dropsApi(req, res, a, b ? decodeURIComponent(b) : '', c);
   if (m === 'GET' && a === 'app') return send(res, 200, await latestApp());

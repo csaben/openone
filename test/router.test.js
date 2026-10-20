@@ -113,6 +113,48 @@ test('Router: within the sticky window a note follows the last one to its agent;
   assert.equal(sent.length, 2);
 });
 
+test('Router + jev: scores the note; a low bar sends it, unsure ones carry a ref; not_for_me refiles', async (t) => {
+  const sent = [];
+  const said = [];
+  const r = new Router({ cfg: { to: 'shop@desk', jev: { url: 'http://jev/', key: 'k', threshold: 0.35, sureAt: 0.75 } }, roster: () => AGENTS, send: (to, text) => sent.push([to, text]), confirm: (s) => said.push(s) });
+  let p = 0.5;
+  const calls = [];
+  t.mock.method(globalThis, 'fetch', async (u, o) => {
+    calls.push([u, o]);
+    if (String(u).includes('/v1/systemone')) return { ok: true, json: async () => ({ answers: { for_agent: { type: 'noul', noul: p }, which: { type: 'choice', choice: 'api@box', confidence: 0.4 } } }) };
+    return { ok: true, json: async () => ({}) }; // the refile URL
+  });
+  // unsure -> to the default (which-confidence too low), tagged with a ref
+  const out = await r.route({ text: 'is any of this worth it', refile: 'http://notes/api/notes/n1/reprocess' });
+  assert.equal(out.route, 'agent');
+  assert.equal(out.to, 'shop@desk');
+  assert.match(sent[0][1], /^\[ring\? 50% sure this is for you; if it isn't, call not_for_me with ref "(r\w+)"\] is any of this worth it$/);
+  const body = JSON.parse(calls[0][1].body);
+  assert.equal(calls[0][0], 'http://jev/v1/systemone');
+  assert.equal(calls[0][1].headers.authorization, 'Bearer k');
+  assert.equal(body.state.note, 'is any of this worth it');
+  assert.ok(body.questions.for_agent && body.questions.which);
+  const ref = sent[0][1].match(/ref "(r\w+)"/)[1];
+  await r.notForMe(ref);
+  assert.equal(calls[calls.length - 1][0], 'http://notes/api/notes/n1/reprocess');
+  assert.deepEqual(said, ['Sent to shop.', 'Filed as a note.']);
+  await assert.rejects(r.notForMe(ref), /no message with ref/);
+  // sure -> plain tag; low -> note
+  p = 0.9;
+  await r.route({ text: 'deploy it' });
+  assert.equal(sent[1][1], '[ring] deploy it');
+  p = 0.1;
+  assert.equal((await r.route({ text: 'what a day' })).route, 'note');
+});
+
+test('Router + jev down: falls back to sticky, then the chat model', async (t) => {
+  const r = new Router({ cfg: { to: 'shop@desk', jev: { url: 'http://jev', key: 'k' } }, roster: () => AGENTS, send: () => ({}) });
+  t.mock.method(globalThis, 'fetch', async () => { throw new Error('ECONNREFUSED'); });
+  const out = await r.route({ text: 'hmm' });
+  assert.equal(out.route, 'note');
+  assert.match(out.why, /no router model configured \(ECONNREFUSED\)/);
+});
+
 test('typedLine: the user\'s relayed words are typed as they are', () => {
   assert.equal(typedLine({ content: '[ring] check the build', from: 'voice', user: true }), '[ring] check the build');
 });
