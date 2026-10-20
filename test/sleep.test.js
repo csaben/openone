@@ -38,6 +38,17 @@ test('sleep: exits an idle agent, reads its id, closes the pane', async () => {
   await assert.rejects(sleepAgent({ src }, { ...p, state: 'working' }), /working/);
 });
 
+test('sleep: no resume id in time -> the pane stays open', async () => {
+  const sent = [];
+  const src = {
+    target: () => 's:2.%5', keys: async () => {}, text: async () => {}, screen: async () => '> generating…',
+    batch: async (argvs) => { sent.push(argvs[0][0]); return ['']; },
+  };
+  const p = { host: 'devbox', kind: 'claude', label: 'x', path: '/x', state: 'idle', session: 's', windowIndex: '2', paneId: '%5' };
+  await assert.rejects(sleepAgent({ src }, p, { timeoutMs: 1000 }), /left its window open/);
+  assert.deepEqual(sent, []);
+});
+
 test('sleep: records survive a restart; take removes', () => {
   const file = require('path').join(require('fs').mkdtempSync(require('path').join(require('os').tmpdir(), 'z-')), 's.json');
   const a = new Sleepers({ file });

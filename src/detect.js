@@ -2,11 +2,21 @@
 // Pure functions only: everything here is driven by fixtures in test/.
 
 const RULE = /^\s*[─━╌]{3,}/;
-const OPTION = /^\s*[│|]?\s*([❯›>])?\s*(\d)[.)]\s+(.+?)\s*[│|]?\s*$/;
+// on a trimmed line; the label's right box edge comes off after (a lazy label followed by
+// optional spaces backtracked badly on space-padded lines: most of openone's idle CPU)
+const OPTION = /^[│|]?\s*([❯›>])?\s*(\d)[.)]\s+(.+)$/;
 const BOX_EDGE = /^\s*[│|╭╰]|[│|╮╯]\s*$/g;
 
 function clean(line) {
   return line.replace(BOX_EDGE, '').replace(/\s+$/, '').trim();
+}
+
+// "❯ 1. Yes" -> [whole, cursor, digit, label] like a match, or null
+function option(line) {
+  const m = line.trim().match(OPTION);
+  if (!m) return null;
+  const label = m[3].replace(/\s*[│|]$/, '').trim();
+  return label ? [m[0], m[1], m[2], label] : null;
 }
 
 function detectKind(text, meta = {}) {
@@ -22,15 +32,16 @@ function detectKind(text, meta = {}) {
 // Finds a numbered menu near the bottom of the screen that a cursor is sitting on.
 function findMenu(lines) {
   const tail = lines.slice(-30);
+  const matched = tail.map(option);
   let best = null;
   for (let i = 0; i < tail.length; i++) {
-    const m = tail[i].match(OPTION);
+    const m = matched[i];
     if (!m || m[2] !== '1') continue;
     const opts = [];
     let cursor = false;
     let expect = 1;
     for (let j = i; j < tail.length; j++) {
-      const mm = tail[j].match(OPTION);
+      const mm = matched[j];
       if (mm && Number(mm[2]) === expect) {
         if (mm[1]) cursor = true;
         let label = mm[3].replace(/\s+\((?:y|a|esc|n)\)$/i, '').trim();

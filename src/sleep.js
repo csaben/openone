@@ -3,7 +3,8 @@
 // Sleeping an idle agent exits it the way you would (/exit), reads the resume command it
 // prints on the way out ("claude --resume <id>", "codex resume <id>"), closes its window
 // and remembers it. Waking opens a window in the same folder and resumes that
-// conversation. Without a printed id, wake falls back to the folder's latest
+// conversation. With no id printed in time it leaves the window open; records without one
+// (older ones) wake into the folder's latest
 // conversation (--continue / resume --last).
 //
 // Kept in a JSON file next to the asks (~/.local/state/openone/sleeping.json).
@@ -74,7 +75,8 @@ class Sleepers {
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // p: a pane record from the monitor; h: its host. -> what to remember
-async function sleepAgent(h, p, { timeoutMs = 20000 } = {}) {
+// Claude can take 10-30s to print its resume line (it writes a summary on the way out)
+async function sleepAgent(h, p, { timeoutMs = 90000 } = {}) {
   if (!EXIT[p.kind]) throw new Error('only Claude and Codex agents can sleep');
   if (p.bg) throw new Error("background sessions can't sleep yet");
   if (p.state !== 'idle') throw new Error(p.state === 'working' ? "it's working; let it finish first" : 'it is waiting on you; answer it first');
@@ -94,7 +96,8 @@ async function sleepAgent(h, p, { timeoutMs = 20000 } = {}) {
     id = resumeId(p.kind, text);
     if (id) break;
   }
-  // the shell is back (or it never printed an id): close the window either way, as asked
+  // no id: leave the window, so the conversation isn't lost to a guess at "the latest one"
+  if (!id) throw new Error(`it didn't print a resume id within ${Math.round(timeoutMs / 1000)}s; left its window open`);
   await h.src.batch([['kill-pane', '-t', h.src.target(p)]]).catch(() => {});
   return {
     host: p.host, kind: p.kind, label: p.label, title: p.title || '', summary: p.summary || '',

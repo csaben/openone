@@ -60,3 +60,12 @@ test('numbered list in a finished message is not a menu', () => {
 test('plain shell is not an agent', () => {
   assert.equal(detect('PS D:\Code> ls\n\n    Directory: D:\Code\n').state, 'shell');
 });
+
+test('findMenu stays fast on long, space-padded numbered lines', () => {
+  const { detect } = require('../src/detect');
+  const line = `  1. ${'word '.repeat(30)}${' '.repeat(200)}`;
+  const screen = ['╭──', ...Array(40).fill(line), '❯ ', '──────', '  ? for shortcuts'].join('\n');
+  const t = process.hrtime.bigint();
+  for (let i = 0; i < 20; i++) detect(screen, { command: 'claude' });
+  assert.ok(Number(process.hrtime.bigint() - t) / 1e6 < 200, 'took too long');
+});
