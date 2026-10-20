@@ -6,7 +6,8 @@
 // goes to a small, fast chat model ("router" in the server config) with the roster. When in
 // doubt, or when the model is down, it's a note: a note is never lost, a message can be.
 //
-// router: { url: ".../v1/chat/completions", model, to: "default agent", timeoutMs, apiKey }
+// router: { url: ".../v1/chat/completions", model, to, timeoutMs, apiKey }
+//   to: the default agent: a name, a pane key, or a list of them (the first one running wins)
 
 const NOTE_CUES = /^\s*(?:(?:a\s+)?note\s+to\s+self|note|memo|journal)\b[\s,:.-]*/i;
 const AGENT_CUES = /^\s*(?:hey\s+|ok(?:ay)?\s+|yo\s+)?(?:claude|codex|agent|openone|open\s+one|zero\s+one)\b[\s,:.-]*/i;
@@ -56,11 +57,22 @@ function parse(content, agentNames, defaultTo) {
 }
 
 class Router {
-  // cfg: the "router" config; roster(): agents; send(to, text): delivers
-  constructor({ cfg = {}, roster, send }) {
+  // cfg: the "router" config; roster(): agents; send(to, text): delivers;
+  // resolve(nameOrKey): the running agent's name, or ''
+  constructor({ cfg = {}, roster, send, resolve }) {
     this.cfg = cfg;
     this.roster = roster;
     this.sendTo = send;
+    this.resolve = resolve || ((t) => t);
+  }
+
+  defaultTo(agents) {
+    for (const t of [].concat(this.cfg.to || [])) {
+      let n = '';
+      try { n = this.resolve(t) || ''; } catch {}
+      if (n && agents.some((a) => a.name === n)) return n;
+    }
+    return '';
   }
 
   async classify(text, agents, defaultTo) {
@@ -92,7 +104,7 @@ class Router {
     const clean = String(text || '').trim();
     if (!clean) return { route: 'note', to: '', why: 'empty', ms: 0 };
     const agents = this.roster();
-    const defaultTo = this.cfg.to && agents.some((a) => a.name === this.cfg.to) ? this.cfg.to : '';
+    const defaultTo = this.defaultTo(agents);
     const out = await this.classify(clean, agents, defaultTo);
     if (out.route === 'agent') {
       try {

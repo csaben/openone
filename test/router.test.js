@@ -62,6 +62,14 @@ test('Router.route: a cue goes to the default agent, minus the cue; no default -
   assert.equal((await r2.route({ text: 'Claude, ship it' })).route, 'note');
 });
 
+test('Router: the default is the first of "to" that is running, by key or name', async () => {
+  const keys = { 'desk|0|%5': 'shop@desk' };
+  const r = new Router({ cfg: { to: ['desk|0|%9', 'desk|0|%5', 'api@box'] }, roster: () => AGENTS, send: () => {}, resolve: (t) => keys[t] || (t.includes('@') ? t : '') });
+  assert.equal(r.defaultTo(AGENTS), 'shop@desk');
+  const r2 = new Router({ cfg: { to: 'gone|0|%1' }, roster: () => AGENTS, send: () => {}, resolve: () => { throw new Error('ambiguous'); } });
+  assert.equal(r2.defaultTo(AGENTS), '');
+});
+
 test('typedLine: the user\'s relayed words are typed as they are', () => {
   assert.equal(typedLine({ content: '[ring] check the build', from: 'voice', user: true }), '[ring] check the build');
 });

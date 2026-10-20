@@ -73,6 +73,7 @@ const speech = new Speech({ synth: httpSynth(cfg.tts) });
 const router = new Router({
   cfg: cfg.router || {},
   roster: () => bus.roster(null),
+  resolve: (t) => { const p = bus.resolve(t); return p ? bus.names().get(p.key) : ''; },
   send: (to, text) => { const m = bus.send({ fromName: 'voice', to, content: text, user: true }); pushState(); return { id: m.id, to: m.to, status: m.status }; },
 });
 const board = new Board({ dir: path.join(require('os').homedir(), '.local', 'state', 'openone', 'board'), onChange: (v) => broadcast('board', { version: v }) });
