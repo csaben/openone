@@ -116,7 +116,7 @@ test('Router: within the sticky window a note follows the last one to its agent;
 test('Router + jev: scores the note; a low bar sends it, unsure ones carry a ref; not_for_me refiles', async (t) => {
   const sent = [];
   const said = [];
-  const r = new Router({ cfg: { to: 'shop@desk', jev: { url: 'http://jev/', key: 'k', threshold: 0.35, sureAt: 0.75 } }, roster: () => AGENTS, send: (to, text) => sent.push([to, text]), confirm: (s) => said.push(s) });
+  const r = new Router({ cfg: { to: 'shop@desk', jev: { url: 'http://jev/v1/', key: 'k', threshold: 0.35, sureAt: 0.75 } }, roster: () => AGENTS, send: (to, text) => sent.push([to, text]), confirm: (s) => said.push(s) });
   let p = 0.5;
   const calls = [];
   t.mock.method(globalThis, 'fetch', async (u, o) => {

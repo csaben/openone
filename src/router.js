@@ -129,7 +129,8 @@ class Router {
       default_agent_last_said: def && def.summary ? String(def.summary).slice(0, 600) : null,
       recent_notes_sent_to_agents: this.recent(),
     };
-    const r = await fetch(`${String(j.url).replace(/\/+$/, '')}/v1/systemone`, {
+    // url is the versioned API root (https://api.typesafe.ai/v1, or a key proxy in front of it)
+    const r = await fetch(`${String(j.url).replace(/\/+$/, '')}/systemone`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${j.key}` },
       body: JSON.stringify({ model: j.model || 'jev-latest', state, questions }),
