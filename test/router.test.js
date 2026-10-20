@@ -133,7 +133,7 @@ test('Router + jev: scores the note; a low bar sends it, unsure ones carry a ref
   assert.equal(calls[0][0], 'http://jev/v1/systemone');
   assert.equal(calls[0][1].headers.authorization, 'Bearer k');
   assert.equal(body.state.note, 'is any of this worth it');
-  assert.ok(body.questions.for_agent && body.questions.which);
+  assert.ok(body.questions.for_agent && !body.questions.which);
   const ref = sent[0][1].match(/ref "(r\w+)"/)[1];
   await r.notForMe(ref);
   assert.equal(calls[calls.length - 1][0], 'http://notes/api/notes/n1/reprocess');
@@ -145,6 +145,9 @@ test('Router + jev: scores the note; a low bar sends it, unsure ones carry a ref
   assert.equal(sent[1][1], '[ring] deploy it');
   p = 0.1;
   assert.equal((await r.route({ text: 'what a day' })).route, 'note');
+  // naming another agent sends it there
+  p = 0.9;
+  assert.equal((await r.route({ text: 'tell api to restart' })).to, 'api@box');
 });
 
 test('Router + jev down: falls back to sticky, then the chat model', async (t) => {

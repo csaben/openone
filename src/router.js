@@ -116,13 +116,6 @@ class Router {
         criteria: { true: 'Talk meant for an agent to read and act on or answer.', false: 'A note to self: a thought, journal entry, idea or reminder, not addressed to an agent.' },
       },
     };
-    if (agents.length > 1) {
-      questions.which = {
-        type: 'choice',
-        instructions: 'If the note is meant for an agent, which one? Without a clear sign, the default agent.',
-        criteria: Object.fromEntries(agents.map((a) => [a.name, `${a.title || a.kind}${a.name === defaultTo ? ' (the default agent)' : ''}`])),
-      };
-    }
     const state = {
       note: String(text).slice(0, 4000),
       default_agent: defaultTo || null,
@@ -140,7 +133,13 @@ class Router {
     const a = (await r.json()).answers || {};
     const p = a.for_agent && typeof a.for_agent.noul === 'number' ? a.for_agent.noul : null;
     if (p === null) throw new Error('jev gave no score');
-    const pick = a.which && a.which.confidence >= 0.6 && agents.some((x) => x.name === a.which.choice) ? a.which.choice : defaultTo;
+    // which agent: one the note names ("tell cblur ..."), else the conversation it follows, else the
+    // default (a scoring model's pick drifted to whichever agent shared a word with the note)
+    const words = (s) => ` ${String(s).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()} `;
+    const said = words(text);
+    const named = agents.filter((x) => x.name !== defaultTo && said.includes(words(x.name.split('@')[0].split('.')[0])));
+    const last = this.sent[this.sent.length - 1];
+    const pick = named.length === 1 ? named[0].name : (last && agents.some((x) => x.name === last.to) ? last.to : defaultTo);
     const pct = `${Math.round(p * 100)}%`;
     if (p >= (j.threshold ?? 0.35) && pick) return { route: 'agent', to: pick, why: `jev ${pct}`, p };
     return { route: 'note', to: '', why: `jev ${pct}`, p };
