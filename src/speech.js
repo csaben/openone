@@ -3,7 +3,8 @@
 // at a time, and a desktop app picks each part up and plays it as soon as it's ready, so
 // the first sentence plays while the rest are still being made.
 //
-// tts: { url, format: 'mp3'|'wav', field: 'text' } -> POST url with JSON { text, format }, audio back.
+// tts: { url, format: 'mp3'|'wav', field: 'text', say: { word: 'how to say it' } } -> POST url with
+// JSON { text, format }, audio back. `say` fixes how names come out ("openone": "oh one").
 
 const crypto = require('crypto');
 
@@ -104,7 +105,11 @@ class Speech {
 function httpSynth(tts) {
   if (!tts || !tts.url) return null;
   const format = tts.format || 'mp3';
-  return async (text) => {
+  // longest first, so "openone@inari" wins over "openone"
+  const say = Object.entries(tts.say || {}).sort((a, b) => b[0].length - a[0].length)
+    .map(([w, as]) => [new RegExp(`(?<![\\w@])${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w@])`, 'gi'), as]);
+  return async (raw) => {
+    const text = say.reduce((t, [re, as]) => t.replace(re, as), raw);
     const r = await fetch(tts.url, {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ [tts.field || 'text']: text, format, ...(tts.extra || {}) }),

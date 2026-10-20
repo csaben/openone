@@ -46,3 +46,14 @@ test('speech: a failed part is skipped, and without a tts service it says so', a
   assert.throws(() => new Speech().say({ text: 'hi' }), /tts/);
   assert.throws(() => sp.say({ text: '' }), /nothing to say/);
 });
+
+test('speech: "say" fixes how names are pronounced, whole words only', async () => {
+  const { httpSynth } = require('../src/speech');
+  const sent = [];
+  const real = global.fetch;
+  global.fetch = async (_u, o) => { sent.push(JSON.parse(o.body).text); return { ok: true, arrayBuffer: async () => new ArrayBuffer(1), headers: { get: () => 'audio/mpeg' } }; };
+  try {
+    await httpSynth({ url: 'x', say: { openone: 'oh one', 'openone@desk': 'oh one on desk' } })('Openone here. openone@desk too. reopenone stays.');
+  } finally { global.fetch = real; }
+  assert.deepEqual(sent, ['oh one here. oh one on desk too. reopenone stays.']);
+});
