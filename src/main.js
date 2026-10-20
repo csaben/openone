@@ -777,6 +777,41 @@ function voiceView() {
   };
 }
 
+// what happened, for when it seems to do nothing: %APPDATA%openoneoice.log
+function vlog(msg) {
+  try {
+    const f = path.join(app.getPath('userData'), 'voice.log');
+    if (fs.existsSync(f) && fs.statSync(f).size > 256 * 1024) fs.renameSync(f, `${f}.old`);
+    fs.appendFileSync(f, `${new Date().toISOString()} ${msg}
+`);
+  } catch {}
+}
+
+// The indicator at the bottom of the screen the cursor is on: { mode: open|rec|stt|ok|err|hide, title, detail }
+let pillWin = null;
+let pillTimer = null;
+function pill(s) {
+  clearTimeout(pillTimer);
+  if (s.mode === 'hide') { if (pillWin && !pillWin.isDestroyed()) pillWin.hide(); return; }
+  const W = 440;
+  const H = 64;
+  if (!pillWin || pillWin.isDestroyed()) {
+    pillWin = new BrowserWindow({
+      width: W, height: H, frame: false, transparent: true, resizable: false, movable: false, focusable: false, skipTaskbar: true,
+      alwaysOnTop: true, show: false, hasShadow: false, type: 'toolbar',
+      webPreferences: { preload: path.join(__dirname, 'pill-preload.js'), backgroundThrottling: false },
+    });
+    pillWin.setIgnoreMouseEvents(true);
+    pillWin.setAlwaysOnTop(true, 'screen-saver');
+    pillWin.loadFile(path.join(__dirname, 'ui', 'pill.html'));
+  }
+  const wa = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
+  pillWin.setBounds({ x: Math.round(wa.x + (wa.width - W) / 2), y: Math.round(wa.y + wa.height - H - 18), width: W, height: H });
+  const send = () => { pillWin.webContents.send('pill', s); if (!pillWin.isVisible()) pillWin.showInactive(); };
+  if (pillWin.webContents.isLoading()) pillWin.webContents.once('did-finish-load', send); else send();
+  if (s.mode === 'ok' || s.mode === 'err') pillTimer = setTimeout(() => pill({ mode: 'hide' }), s.mode === 'ok' ? 3500 : 7000);
+}
+
 function recorder() {
   if (recWin && !recWin.isDestroyed()) return recWin;
   recWin = new BrowserWindow({ show: false, webPreferences: { preload: path.join(__dirname, 'recorder-preload.js'), backgroundThrottling: false } });
@@ -790,12 +825,14 @@ function onVoiceKey(ev) {
     if (!r) return;
     vCapture = null;
     vState.capturing = false;
+    vlog(`captured ${JSON.stringify(r)}`);
     if (r.trigger) saveVoice({ trigger: r.trigger, enabled: true });
     else { vState.error = r.error || ''; push(); }
     return;
   }
   if (!vTrigger) return;
   const r = vTrigger.feed(ev);
+  if (r) vlog(`${r} (${ev.type} ${ev.type.startsWith('mouse') ? `button ${ev.button}` : `key ${ev.keycode}`})`);
   if (r === 'press') {
     if (vcfg().mode === 'toggle' && vState.state === 'rec') stopRec(); else startRec();
   } else if (r === 'release' && vcfg().mode !== 'toggle') stopRec();
@@ -827,6 +864,7 @@ function startRec() {
   vState = { ...vState, state: 'rec', error: '' };
   recStarted = Date.now();
   push();
+  pill({ mode: 'open', title: 'Opening the mic…' });
   const go = () => w.webContents.send('rec:start', { beep: vcfg().beep !== false, mic: vcfg().mic || '' });
   if (w.webContents.isLoading()) w.webContents.once('did-finish-load', go); else go();
   clearTimeout(recTimer);
@@ -839,6 +877,8 @@ function stopRec() {
   recLen = Date.now() - recStarted;
   vState.state = 'stt';
   push();
+  vlog(`stop after ${recLen} ms`);
+  pill({ mode: 'stt', title: 'Transcribing…' });
   recWin.webContents.send('rec:stop', { beep: vcfg().beep !== false });
 }
 
@@ -859,18 +899,29 @@ function pasteText(text, enter) {
 
 async function heard(audio) {
   const v = vcfg();
-  if (recLen < 350) { vState.state = 'idle'; push(); return; } // a tap, not speech
+  vlog(`audio ${audio.length} bytes`);
+  if (recLen < 350 || audio.length < 1000) { // a tap, not speech
+    vState.state = 'idle';
+    push();
+    pill({ mode: 'err', title: 'Too short', detail: v.mode === 'toggle' ? 'press once to start, again to stop' : 'hold it while you talk' });
+    return;
+  }
   try {
+    const t0 = Date.now();
     const text = await voice.transcribe({ url: v.stt, model: v.model, audio });
+    vlog(`heard in ${Date.now() - t0} ms: ${text}`);
     if (!text) throw new Error("Didn't catch anything");
     const p = voiceTarget(v);
     if (v.target && v.target !== 'focused' && !p) throw new Error(`${v.targetLabel || 'That agent'} isn't running. Heard: ${text}`);
     if (p) await reply(p.key, text);
     else pasteText(text, !!v.enter);
     vState = { ...vState, state: 'idle', last: { text, to: p ? p.label : 'focused window', at: Date.now() } };
+    vlog(`sent to ${p ? p.key : 'focused window'}`);
+    pill({ mode: 'ok', title: `Sent to ${p ? p.label : 'the focused window'}`, detail: text });
   } catch (e) {
     vState = { ...vState, state: 'idle', error: e.message };
-    note('Push-to-talk', e.message);
+    vlog(`error: ${e.message}`);
+    pill({ mode: 'err', title: "Push-to-talk didn't work", detail: e.message });
   }
   push();
 }
@@ -879,7 +930,9 @@ const VOICE_KEYS = ['enabled', 'mode', 'target', 'targetLabel', 'targetHost', 'e
 
 function voiceIpc() {
   ipcMain.on('rec:data', (_e, buf) => heard(Buffer.from(buf)));
-  ipcMain.on('rec:error', (_e, msg) => { vState = { ...vState, state: 'idle', error: msg }; note('Push-to-talk', msg); push(); });
+  ipcMain.on('rec:error', (_e, msg) => { vState = { ...vState, state: 'idle', error: msg }; vlog(`mic error: ${msg}`); pill({ mode: 'err', title: "Couldn't open the mic", detail: msg }); push(); });
+  ipcMain.on('rec:started', () => { vlog(`mic open after ${Date.now() - recStarted} ms`); if (vState.state === 'rec') pill({ mode: 'rec', title: 'Listening', detail: voice.label(vcfg().trigger) }); });
+  ipcMain.on('rec:level', (_e, v) => { if (pillWin && !pillWin.isDestroyed()) pillWin.webContents.send('level', v); });
   ipcMain.handle('voice:set', (_e, patch) => {
     const clean = {};
     for (const k of VOICE_KEYS) if (patch && patch[k] !== undefined) clean[k] = patch[k];

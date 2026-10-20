@@ -6,6 +6,9 @@ let rec = null;
 let chunks = [];
 let stream = null;
 let ctx = null;
+let meter = null;
+let opening = false; // waiting on the mic
+let stopEarly = false; // let go before it opened
 
 function tone(freq, ms) {
   try {
@@ -23,11 +26,21 @@ function tone(freq, ms) {
 }
 
 window.ooRec.onStart(async ({ beep, mic }) => {
-  if (rec) return;
+  if (rec || opening) return;
+  opening = true;
+  stopEarly = false;
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: mic ? { deviceId: mic } : { echoCancellation: true, noiseSuppression: true } });
   } catch (e) {
+    opening = false;
     window.ooRec.error(`Couldn't open the microphone: ${e.message}`);
+    return;
+  }
+  opening = false;
+  if (stopEarly) {
+    for (const t of stream.getTracks()) t.stop();
+    stream = null;
+    window.ooRec.data(new ArrayBuffer(0));
     return;
   }
   chunks = [];
@@ -42,11 +55,27 @@ window.ooRec.onStart(async ({ beep, mic }) => {
   };
   rec.start(250);
   if (beep) tone(880, 90);
+  // how loud, ~12 times a second, for the indicator
+  try {
+    ctx = ctx || new AudioContext();
+    const an = ctx.createAnalyser();
+    an.fftSize = 512;
+    ctx.createMediaStreamSource(stream).connect(an);
+    const buf = new Float32Array(an.fftSize);
+    meter = setInterval(() => {
+      an.getFloatTimeDomainData(buf);
+      let sum = 0;
+      for (const x of buf) sum += x * x;
+      window.ooRec.level(Math.sqrt(sum / buf.length));
+    }, 80);
+  } catch {}
   window.ooRec.started();
 });
 
 window.ooRec.onStop(({ beep }) => {
+  if (opening) { stopEarly = true; return; }
   if (!rec) return;
   if (beep) tone(560, 90);
+  clearInterval(meter);
   rec.stop();
 });

@@ -7,4 +7,5 @@ contextBridge.exposeInMainWorld('ooRec', {
   started: () => ipcRenderer.send('rec:started'),
   data: (buf) => ipcRenderer.send('rec:data', buf),
   error: (msg) => ipcRenderer.send('rec:error', String(msg)),
+  level: (v) => ipcRenderer.send('rec:level', v),
 });

@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'">
+  <title>openone push-to-talk</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
+    body { display: flex; align-items: flex-end; justify-content: center; font: 600 13px "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; color: #eeeff1; user-select: none; }
+    #pill { display: flex; align-items: center; gap: 10px; max-width: 400px; margin-bottom: 6px; padding: 9px 16px 9px 12px; border-radius: 999px;
+      background: rgba(24, 25, 29, .94); border: 1px solid rgba(255, 255, 255, .1); box-shadow: 0 8px 28px rgba(0, 0, 0, .45); opacity: 0; transform: translateY(8px); transition: opacity .15s, transform .15s; }
+    #pill.show { opacity: 1; transform: none; }
+    #dot { width: 10px; height: 10px; border-radius: 50%; flex: none; background: #8d919a; }
+    .rec #dot { background: #ff5252; box-shadow: 0 0 10px #ff5252; animation: pulse 1s ease-in-out infinite; }
+    .open #dot { background: #ffb74d; }
+    .stt #dot { background: #2f7cf6; animation: pulse .7s ease-in-out infinite; }
+    .ok #dot { background: #3fcf74; }
+    .err #dot { background: #ff8a80; }
+    #bars { display: none; align-items: center; gap: 2px; height: 18px; }
+    .rec #bars { display: flex; }
+    #bars i { width: 3px; height: 3px; border-radius: 2px; background: #ff8a80; transition: height .08s; }
+    #text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    #text small { font-weight: 500; color: #a9adb5; }
+    @keyframes pulse { 50% { opacity: .45; } }
+  </style>
+</head>
+<body>
+  <div id="pill"><span id="dot"></span><span id="bars"></span><span id="text"></span></div>
+  <script src="pill.js"></script>
+</body>
+</html>
