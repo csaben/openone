@@ -592,9 +592,12 @@ async function speakApi(req, res, id, action) {
     catch (e) { return send(res, e.code || 500, { error: e.message }); }
   }
   if (!id && m === 'GET') {
-    let list = speech.take(q.get('for') || 'someone');
+    // ?for=<device>&kind=desktop&idle=<ms> | ?for=phone&kind=phone&headset=1
+    const by = q.get('for') || 'someone';
+    if (q.get('kind')) speech.seen(by, { kind: q.get('kind') === 'phone' ? 'phone' : 'desktop', idleMs: q.get('idle'), headset: q.get('headset') === '1' });
+    let list = speech.take(by);
     const wait = Math.min(Number(q.get('wait')) || 0, 55);
-    if (!list.length && wait) { await speech.wait(wait * 1000); list = speech.take(q.get('for') || 'someone'); }
+    if (!list.length && wait) { await speech.wait(wait * 1000); list = speech.take(by); }
     return send(res, 200, list);
   }
   if (id && m === 'GET' && action === 'audio') {

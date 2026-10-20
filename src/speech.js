@@ -33,12 +33,35 @@ function sentences(text, maxLen = 220) {
   return out;
 }
 
+// Which device plays it. Desktops poll with how long you've been idle there; a phone polls only
+// while headphones are connected (it never plays on its speaker). The phone gets it when it
+// has headphones and no desktop has seen you for awayMs (you're out); otherwise the desktop.
+// A device that hasn't polled for a minute doesn't count.
+const SEEN_MS = 70000;
+
 class Speech {
-  constructor({ synth, now = Date.now } = {}) {
+  constructor({ synth, now = Date.now, awayMs = 180000 } = {}) {
     this.synth = synth; // async (text) -> { audio: Buffer, mime }
     this.now = now;
+    this.awayMs = awayMs;
     this.items = []; // { id, group, seq, of, from, text, audio, mime, at, claimed, status }
     this.waiters = new Set();
+    this.devices = new Map(); // name -> { kind: 'desktop'|'phone', idleMs, headset, at }
+  }
+
+  // a poll from a device: { kind, idleMs (desktop), headset (phone) }
+  seen(name, { kind = 'desktop', idleMs = 0, headset = false } = {}) {
+    this.devices.set(name, { kind, idleMs: Number(idleMs) || 0, headset: !!headset, at: this.now() });
+  }
+
+  // 'phone' or 'desktop': who should play what's ready now
+  target() {
+    const t = this.now();
+    const live = [...this.devices.values()].filter((d) => t - d.at < SEEN_MS);
+    if (!live.some((d) => d.kind === 'phone' && d.headset)) return 'desktop';
+    const desks = live.filter((d) => d.kind === 'desktop');
+    // idle grows while a desktop long-polls, so count the time since it asked
+    return desks.every((d) => d.idleMs + (t - d.at) >= this.awayMs) ? 'phone' : 'desktop';
   }
 
   // -> { group, parts }: made in the background, in order
@@ -71,9 +94,12 @@ class Speech {
     this.items = this.items.filter((x) => t - x.at < TTL);
   }
 
-  // ready parts nobody has taken, in order; a part waits for the ones before it in its group
+  // ready parts nobody has taken, in order; a part waits for the ones before it in its group.
+  // Only the device kind target() picks gets any (a device that never said its kind is a desktop).
   take(by) {
     this.prune();
+    const me = this.devices.get(by);
+    if ((me ? me.kind : 'desktop') !== this.target()) return [];
     const out = [];
     for (const it of this.items) {
       if (it.claimed || it.status === 'making') continue;

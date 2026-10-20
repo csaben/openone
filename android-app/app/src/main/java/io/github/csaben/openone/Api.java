@@ -73,7 +73,7 @@ final class Api {
         return j;
     }
 
-    private static String slurp(InputStream in) throws IOException {
+    static String slurp(InputStream in) throws IOException {
         ByteArrayOutputStream buf = new ByteArrayOutputStream();
         byte[] b = new byte[8192];
         for (int n; (n = in.read(b)) > 0; ) buf.write(b, 0, n);

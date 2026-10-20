@@ -936,7 +936,10 @@ async function pollSpeech() {
   if (vcfg().speak === false) return;
   for (;;) {
     try {
-      const r = await fetch(`${serverUrl()}/api/speak?for=${encodeURIComponent(dropName())}&wait=25`, { signal: AbortSignal.timeout(40000) });
+      // how long you've been away from this computer: the server sends speech to a phone with
+      // headphones instead once you've been away a while
+      const idle = powerMonitor.getSystemIdleTime() * 1000;
+      const r = await fetch(`${serverUrl()}/api/speak?for=${encodeURIComponent(dropName())}&kind=desktop&idle=${idle}&wait=25`, { signal: AbortSignal.timeout(40000) });
       if (r.ok) {
         for (const part of await r.json()) {
           const a = await fetch(`${serverUrl()}/api/speak/${encodeURIComponent(part.id)}/audio`, { signal: AbortSignal.timeout(20000) });

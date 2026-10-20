@@ -57,3 +57,32 @@ test('speech: "say" fixes how names are pronounced, whole words only', async () 
   } finally { global.fetch = real; }
   assert.deepEqual(sent, ['oh one here. oh one on desk too. reopenone stays.']);
 });
+
+test('speech goes to the phone only with headphones on and the desktops left alone', async () => {
+  let t = 1000000;
+  const s = new Speech({ synth: async () => ({ audio: Buffer.from('a'), mime: 'audio/mpeg' }), now: () => t, awayMs: 180000 });
+  s.say({ text: 'One.' });
+  await new Promise((r) => setImmediate(r));
+  // nobody said what they are: a plain desktop, as before
+  assert.equal(s.target(), 'desktop');
+  s.seen('desk', { kind: 'desktop', idleMs: 5000 });
+  s.seen('phone', { kind: 'phone', headset: true });
+  assert.equal(s.target(), 'desktop'); // you're at the desk
+  assert.deepEqual(s.take('phone'), []);
+  s.seen('desk', { kind: 'desktop', idleMs: 200000 });
+  assert.equal(s.target(), 'phone'); // away for over 3 minutes
+  assert.deepEqual(s.take('desk'), []);
+  assert.equal(s.take('phone').length, 1);
+  // headphones off: back to the desktop
+  s.seen('phone', { kind: 'phone', headset: false });
+  assert.equal(s.target(), 'desktop');
+  // a phone that stopped polling stops counting
+  s.seen('phone', { kind: 'phone', headset: true });
+  t += 80000;
+  s.seen('desk', { kind: 'desktop', idleMs: 300000 });
+  assert.equal(s.target(), 'desktop');
+  // no desktop running at all: the phone
+  const s2 = new Speech({ now: () => t });
+  s2.seen('phone', { kind: 'phone', headset: true });
+  assert.equal(s2.target(), 'phone');
+});

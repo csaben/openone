@@ -67,7 +67,12 @@ public class WatchService extends Service {
         nm = getSystemService(NotificationManager.class);
         channels(nm);
         startForeground(STATUS_ID, status("Connecting…"), ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
+        speaker = new Speaker(this);
+        speaker.start();
     }
+
+    /** agents' spoken replies, on your headphones when you're away from the computer */
+    private Speaker speaker;
 
     static void channels(NotificationManager nm) {
         NotificationChannel s = new NotificationChannel(CH_STATUS, "Connection", NotificationManager.IMPORTANCE_MIN);
@@ -100,6 +105,7 @@ public class WatchService extends Service {
     @Override
     public void onDestroy() {
         running = false;
+        if (speaker != null) speaker.stop();
         HttpURLConnection c = conn;
         if (c != null) c.disconnect();
         super.onDestroy();
