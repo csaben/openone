@@ -76,9 +76,9 @@ test('speech goes to the phone only with headphones on and the desktops left alo
   // headphones off: back to the desktop
   s.seen('phone', { kind: 'phone', headset: false });
   assert.equal(s.target(), 'desktop');
-  // a phone that stopped polling stops counting
+  // a phone silent for over half an hour stops counting
   s.seen('phone', { kind: 'phone', headset: true });
-  t += 80000;
+  t += 31 * 60000;
   s.seen('desk', { kind: 'desktop', idleMs: 300000 });
   assert.equal(s.target(), 'desktop');
   // no desktop running at all: the phone
@@ -103,4 +103,37 @@ test('speech: by default, headphones on the phone win even at an active desktop'
   assert.equal(s.target(), 'desktop');
   s.seen('phone', { kind: 'phone', headset: true });
   assert.equal(s.target(), 'phone');
+});
+
+test('speech: a phone out of signal keeps its speech; a cut-off download is offered again', async () => {
+  let t = 5000000;
+  const s = new Speech({ synth: async () => ({ audio: Buffer.from('a'), mime: 'audio/mpeg' }), now: () => t });
+  s.seen('phone', { kind: 'phone', headset: true });
+  s.seen('desk', { kind: 'desktop' });
+  t += 10 * 60000; // ten minutes in an elevator; the desktop keeps polling
+  s.seen('desk', { kind: 'desktop' });
+  s.say({ text: 'While you were out.' });
+  await new Promise((r) => setImmediate(r));
+  assert.equal(s.target(), 'phone');
+  assert.deepEqual(s.take('desk'), []);
+  t += 20 * 60000; // back in signal, 20 minutes later
+  s.seen('phone', { kind: 'phone', headset: true });
+  const got = s.take('phone');
+  assert.equal(got.length, 1);
+  // the download died: nothing played, no DELETE; after 3 minutes it's offered again
+  assert.deepEqual(s.take('phone'), []);
+  t += 4 * 60000;
+  s.seen('phone', { kind: 'phone', headset: true });
+  assert.equal(s.take('phone')[0].id, got[0].id);
+  s.done(got[0].id);
+  t += 4 * 60000;
+  assert.deepEqual(s.take('phone'), []);
+  // headphones off: the desktop at once
+  s.seen('phone', { kind: 'phone', headset: false });
+  assert.equal(s.target(), 'desktop');
+  // over half an hour of silence: the phone is gone
+  s.seen('phone', { kind: 'phone', headset: true });
+  t += 31 * 60000;
+  s.seen('desk', { kind: 'desktop' });
+  assert.equal(s.target(), 'desktop');
 });

@@ -8,7 +8,10 @@
 
 const crypto = require('crypto');
 
-const TTL = 10 * 60000;
+// Kept an hour, so a phone out of signal (an elevator, the subway) gets it when it's back.
+const TTL = 60 * 60000;
+// Taken but not finished (DELETE) this long: offered again, a download cut off mid-way.
+const RECLAIM_MS = 3 * 60000;
 
 // "First one. Second? Third!" -> parts of up to ~maxLen characters, cut at sentence ends
 function sentences(text, maxLen = 220) {
@@ -37,8 +40,11 @@ function sentences(text, maxLen = 220) {
 // plays on its speaker), and headphones on the phone mean that's where you are: it gets it.
 // Otherwise a desktop. awayMs > 0 adds a condition: only once no desktop has seen you for that
 // long (desktops poll with their idle time).
-// A device that hasn't polled for a minute doesn't count.
+// A desktop that hasn't polled for a minute doesn't count. A phone that last said its headphones
+// were on counts for half an hour of silence: no signal is not the same as gone home, and its
+// speech waits for it. It stops counting at once when it says the headphones came off.
 const SEEN_MS = 70000;
+const PHONE_HOLD_MS = 30 * 60000;
 
 class Speech {
   constructor({ synth, now = Date.now, awayMs = 0 } = {}) {
@@ -58,7 +64,7 @@ class Speech {
   // 'phone' or 'desktop': who should play what's ready now
   target() {
     const t = this.now();
-    const live = [...this.devices.values()].filter((d) => t - d.at < SEEN_MS);
+    const live = [...this.devices.values()].filter((d) => t - d.at < (d.kind === 'phone' && d.headset ? PHONE_HOLD_MS : SEEN_MS));
     if (!live.some((d) => d.kind === 'phone' && d.headset)) return 'desktop';
     const desks = live.filter((d) => d.kind === 'desktop');
     // idle grows while a desktop long-polls, so count the time since it asked
@@ -104,13 +110,16 @@ class Speech {
     const kind = me ? me.kind : 'desktop';
     const mine = kind === this.target();
     const out = [];
+    const t = this.now();
     for (const it of this.items) {
+      if (it.claimed && it.status === 'ready' && t - it.claimedAt > RECLAIM_MS) it.claimed = null;
       if (it.claimed || it.status === 'making') continue;
       if (it.device ? it.device !== kind : !mine) continue;
       const before = this.items.filter((x) => x.group === it.group && x.seq < it.seq);
       if (before.some((x) => x.status === 'making' || (!x.claimed && x.status === 'ready'))) continue;
       if (it.status === 'failed') { it.claimed = by; continue; }
       it.claimed = by;
+      it.claimedAt = t;
       out.push(it);
     }
     return out.map(({ id, group, seq, of, from, text, mime }) => ({ id, group, seq, of, from, text, mime }));
