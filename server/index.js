@@ -20,6 +20,7 @@ const { Sleepers, sleepAgent, wakeAgent } = require('../src/sleep');
 const { Suggester, runCodex, buildPrompt, msUntil } = require('../src/suggest');
 const { Drops } = require('../src/drops');
 const { Board } = require('../src/board');
+const resources = require('../src/resources');
 
 
 const ROOT = path.join(__dirname, '..');
@@ -386,6 +387,58 @@ async function busApi(req, res, what) {
     const lines = Math.min(Number(q.get('lines')) || 60, 400);
     const text = String(await hosts[p.host].src.screen(p, lines)).replace(/\s+$/, '').split('\n').slice(-lines).join('\n');
     return send(res, 200, { name: bus.names().get(p.key), state: p.state, text });
+  }
+  // memory and cpu per pane (agents and shells) and the biggest things outside panes
+  if (m === 'GET' && what === 'resources') {
+    const want = q.get('host') ? [hostOf(q.get('host'))] : Object.values(hosts);
+    const nm = bus.names();
+    const view = new Map(monitor.view().map((p) => [p.key, p]));
+    const out = await Promise.all(want.map(async (h) => {
+      try {
+        const [a, pids] = await Promise.all([h.src.processes(), h.src.panePids()]);
+        const ta = Date.now();
+        await sleep(1000);
+        const b = await h.src.processes();
+        const dt = (Date.now() - ta) / 1000;
+        const panes = [...pids].map(([sp, pid]) => {
+          const key = `${h.cfg.name}|${sp}`;
+          const p = view.get(key) || {};
+          const [session, paneId] = sp.split('|');
+          return {
+            key, pid, name: nm.get(key) || '', kind: p.kind || null, state: p.state || '', since: p.since || 0,
+            label: p.label || '', path: p.path || '', where: `${session}:${p.windowIndex ?? '?'} ${paneId}`,
+          };
+        });
+        return { host: h.cfg.name, ...resources.summarize({ sample: b, cpu: resources.cpuRates(a, b, dt), panes }) };
+      } catch (e) {
+        return { host: h.cfg.name, error: String(e.message || e).split('\n')[0] };
+      }
+    }));
+    return send(res, 200, { hosts: out, sleeping: sleepers.list });
+  }
+  // sleep an idle agent (exit it, remember how to resume) / wake a sleeping one
+  if (m === 'POST' && what === 'sleep') {
+    const p = bus.resolve(body.name);
+    if (!p) return send(res, 404, { error: `no agent named "${body.name}"` });
+    const rec = sleepers.add(await sleepAgent(hosts[p.host], monitor.get(p.key) || p));
+    await refresh(hosts[p.host]).catch(() => {});
+    pushState();
+    return send(res, 200, rec);
+  }
+  if (m === 'POST' && what === 'wake') {
+    const want = String(body.id || body.name || '').toLowerCase();
+    const r0 = sleepers.list.find((x) => x.id === want) ||
+      sleepers.list.filter((x) => String(x.label).toLowerCase() === want || `${String(x.label).toLowerCase()}@${String(x.host).toLowerCase()}` === want).pop();
+    if (!r0) return send(res, 404, { error: `nothing asleep called "${want}"` });
+    const r = sleepers.take(r0.id);
+    const h = hosts[r.host];
+    if (!h) { sleepers.put(r); return send(res, 404, { error: `host ${r.host} isn't connected` }); }
+    try {
+      const np = await wakeAgent(h, cfg, r);
+      await refresh(h).catch(() => {});
+      pushState();
+      return send(res, 200, { key: `${h.cfg.name}|${np.session}|${np.paneId}`, label: r.label, host: r.host });
+    } catch (e) { sleepers.put(r); pushState(); throw e; }
   }
   if (m === 'GET' && what === 'projects') {
     const want = q.get('host') ? [hostOf(q.get('host'))] : Object.values(hosts);

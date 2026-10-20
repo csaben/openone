@@ -18,6 +18,7 @@
 const os = require('os');
 const fs = require('fs');
 const { execFileSync } = require('child_process');
+const { gb } = require('./resources');
 
 const URL_ = (process.env.OPENONE_URL || 'http://127.0.0.1:8950').replace(/\/$/, '');
 const HOST = (process.env.OPENONE_HOST || os.hostname()).toLowerCase();
@@ -138,7 +139,8 @@ const INSTRUCTIONS = 'openone sees every Claude and Codex agent running in tmux/
   'peek shows another agent\'s screen. projects and ls browse the project folders on each host; start launches a new agent in one, ' +
   'with an optional first message. ask puts a question with buttons on the user\'s phone (approve this, pick one) ' +
   'and waits for the tap; use it instead of stopping to wait for the user when one quick decision unblocks you. ' +
-  'board_read and board_draw share a whiteboard with the user: read it when they say they drew something for you, draw on it to sketch a diagram for them.';
+  'board_read and board_draw share a whiteboard with the user: read it when they say they drew something for you, draw on it to sketch a diagram for them. ' +
+  'resources shows what is using RAM, CPU and GPU on each host (per pane and per service); sleep and wake put idle agents away and bring them back.';
 
 const TOOLS = [
   {
@@ -240,13 +242,56 @@ TOOLS.push(
     },
   },
   {
+    name: 'resources',
+    description: 'What is using memory, CPU and GPU on each host: every tmux/psmux pane (agents and shells, with everything they started added up: the agent, its MCP servers, dev servers), the biggest things running outside panes (Linux: by systemd service, e.g. a model server), free RAM, and the agents put to sleep. Takes a few seconds. Use it when the user asks what is running, what is eating RAM, or what to turn off.',
+    inputSchema: { type: 'object', properties: { host: { type: 'string', description: 'Only this host (default: all).' } } },
+  },
+  {
+    name: 'sleep',
+    description: 'Put an idle agent to sleep: exit it (as /exit would), close its window and remember how to resume its conversation. Frees its memory. Only idle agents (not working, not waiting on the user). Undo with wake. Only when the user asks or agrees.',
+    inputSchema: { type: 'object', properties: { name: { type: 'string', description: 'Agent name from roster.' } }, required: ['name'] },
+  },
+  {
+    name: 'wake',
+    description: 'Wake a sleeping agent: open a window in its folder and resume its conversation. Name or id from the "Asleep" list in resources.',
+    inputSchema: { type: 'object', properties: { name: { type: 'string', description: 'Its label ("photo-tidy"), label@host, or id.' } }, required: ['name'] },
+  },
+  {
     name: 'board_clear',
     description: 'Erase the whole shared whiteboard. Only when the user asks for it.',
     inputSchema: { type: 'object', properties: {} },
   },
 );
 
-const size = (n) => (n < 1024 ? `${n} B` : n < 1 << 20 ? `${(n / 1024).toFixed(1)} KB` : `${(n / (1 << 20)).toFixed(1)} MB`);
+const ago = (ms) => {
+  const m = Math.round(Math.max(0, ms) / 60000);
+  return m < 60 ? `${m}m` : m < 48 * 60 ? `${Math.floor(m / 60)}h${m % 60 ? `${m % 60}m` : ''}` : `${Math.round(m / 1440)}d`;
+};
+
+function resourcesText(r) {
+  const out = [];
+  for (const h of r.hosts) {
+    if (h.error) { out.push(`${h.host}: couldn't read processes (${h.error})`); continue; }
+    const used = h.mem.total - h.mem.avail;
+    out.push(`${h.host}: RAM ${gb(used)} of ${gb(h.mem.total)} in use, ${gb(h.mem.avail)} available`);
+    const big = h.panes.filter((p) => p.rss >= 50 << 20);
+    if (big.length) out.push('  Panes, biggest first:');
+    for (const p of big.slice(0, 15)) {
+      const who = p.name ? `${p.name} (${p.kind}, ${p.state}${p.idleMin ? ` ${ago(p.idleMin * 60000)}` : ''})` : `shell ${p.where}${p.label ? ` ${p.label}` : ''}`;
+      out.push(`    ${who}: ${gb(p.rss)} RAM${p.gpu ? `, ${gb(p.gpu)} GPU` : ''}${p.cpu >= 1 ? `, ${Math.round(p.cpu)}% CPU` : ''}` +
+        ` [${p.top.map((t) => `${t.name}${t.count > 1 ? ` x${t.count}` : ''} ${gb(t.rss)}`).join(', ')}]`);
+    }
+    if (big.length > 15) out.push(`    ...and ${big.length - 15} more`);
+    out.push(`  Outside panes: ${h.others.map((g) => `${g.name}${g.count > 1 ? ` x${g.count}` : ''} ${gb(g.rss)}${g.gpu ? ` (+${gb(g.gpu)} GPU)` : ''}${g.cpu >= 5 ? ` ${Math.round(g.cpu)}% CPU` : ''}`).join(', ')}`);
+  }
+  if (r.sleeping && r.sleeping.length) {
+    out.push(`Asleep: ${r.sleeping.map((s) => `${s.label}@${s.host} (${s.kind}, ${ago(Date.now() - s.sleptAt)} ago, id ${s.id})`).join(', ')}`);
+  }
+  out.push('(CPU is % of one core. Agents with a state can be put to sleep with sleep; shells and services you would stop yourself.)');
+  return out.join('\n');
+}
+
+const size = (n) =>(n < 1024 ? `${n} B` : n < 1 << 20 ? `${(n / 1024).toFixed(1)} KB` : `${(n / (1 << 20)).toFixed(1)} MB`);
 
 async function run(name, a, who) {
   if (name === 'roster') {
@@ -277,6 +322,15 @@ async function run(name, a, who) {
   if (name === 'start') {
     const r = await call('POST', 'start', a, who);
     return `Started ${r.name}. ${r.note}.`;
+  }
+  if (name === 'resources') return resourcesText(await call('GET', 'resources', { host: a.host }, who));
+  if (name === 'sleep') {
+    const r = await call('POST', 'sleep', { name: a.name }, who);
+    return `${r.label}@${r.host} is asleep${r.resume ? '' : " (it didn't print a resume id, so wake continues its folder's latest conversation)"}. Wake it with wake "${r.label}".`;
+  }
+  if (name === 'wake') {
+    const r = await call('POST', 'wake', { name: a.name }, who);
+    return `Woke ${r.label} on ${r.host}; it shows up in roster in a few seconds.`;
   }
   if (name === 'board_read') {
     const r = await boardCall('GET', '/read');

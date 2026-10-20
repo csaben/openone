@@ -14,6 +14,7 @@
 const { execFile, spawn } = require('child_process');
 const { SessionStream, parseClients } = require('./stream');
 const { Background, ID: BG_ID } = require('./bg');
+const resources = require('./resources');
 
 const SEP = '<|>';
 const FIELDS = ['pane_id', 'session_name', 'window_index', 'window_name', 'pane_index', 'pane_current_command',
@@ -203,6 +204,20 @@ class TmuxSource {
 
   async keys(p, keys) { await this.batch([['send-keys', '-t', this.target(p), ...keys]]); }
 
+  // "session|%id" -> the pid of the program the pane started (its shell, usually)
+  async panePids() {
+    const [list] = await this.batch([['list-panes', '-a', '-F', ['#{session_name}', '#{pane_id}', '#{pane_pid}'].join(SEP)]]);
+    const out = new Map();
+    for (const line of String(list).split('\n')) {
+      const [s, id, pid] = line.replace(/\r$/, '').split(SEP);
+      if (id && id.startsWith('%') && Number(pid)) out.set(`${s}|${id}`, Number(pid));
+    }
+    return out;
+  }
+
+  // memory, cpu and gpu use of every process on the host (see resources.js)
+  async processes() { return resources.parse(await this.processScript()); }
+
   async text(p, s) {
     await this.batch(hexChunks(s).map((hex) => ['send-keys', '-t', this.target(p), '-H', ...hex]));
   }
@@ -339,6 +354,15 @@ class LocalSource extends TmuxSource {
   claudeLogs(id) { return this.claude(['logs', id]); }
 
   async home() { return require('os').homedir(); }
+
+  processScript() {
+    const [bin, args] = process.platform === 'win32'
+      ? [POWERSHELL, ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(resources.PS, 'utf16le').toString('base64')]]
+      : ['sh', ['-c', resources.SH]];
+    return new Promise((resolve, reject) => {
+      execFile(bin, args, { windowsHide: true, maxBuffer: 32 << 20, timeout: 60000, encoding: 'utf8' }, (err, out) => (err && !out ? reject(err) : resolve(out)));
+    });
+  }
 
   // the start of each project's README (or AGENTS.md, CLAUDE.md, package.json): what it's about
   async projectNotes(dir) {
@@ -544,6 +568,8 @@ class SshTmuxSource extends ShellSource {
 
   async claudeLogs(id) { return this.exec([this.claudeCmd(`logs ${id}`)]); }
 
+  processScript() { return this.exec([resources.SH], 60000); }
+
   async projectNotes(dir) {
     const root = await this.resolve(dir);
     const files = NOTE_FILES.map((f) => `"$d/${f}"`).join(' ');
@@ -658,6 +684,11 @@ class SshPsmuxSource extends ShellSource {
       res.push({ name: s, dir: mode === '@@D', size: 0 });
     }
     return res;
+  }
+
+  async processScript() {
+    const enc = Buffer.from(resources.PS, 'utf16le').toString('base64');
+    return this.clean(await this.exec([`${POWERSHELL} -NoLogo -NoProfile -NonInteractive -EncodedCommand ${enc} < NUL`], 60000));
   }
 
   // drop the banner and the prompt cmd prints before every command
