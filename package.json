@@ -56,6 +56,7 @@
     "@huggingface/tokenizers": "0.2.0",
     "@xterm/addon-serialize": "0.13.0",
     "@xterm/headless": "5.5.0",
-    "onnxruntime-web": "1.22.0"
+    "onnxruntime-web": "1.22.0",
+    "uiohook-napi": "^1.5.4"
   }
 }

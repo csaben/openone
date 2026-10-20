@@ -9,6 +9,7 @@ const actions = require('./actions');
 const projects = require('./projects');
 const { Embedder, semantic, projectText } = require('./embed');
 const { detect: detectConfig } = require('./setup');
+const voice = require('./voice');
 
 // Installed builds keep config in %APPDATA%\openone; a source checkout uses ./config.json.
 const CONFIG = app.isPackaged ? path.join(app.getPath('userData'), 'config.json') : path.join(__dirname, '..', 'config.json');
@@ -136,6 +137,7 @@ function state() {
     muted,
     messages,
     asks,
+    voice: voiceView(),
   };
 }
 
@@ -341,6 +343,7 @@ function menuTemplate() {
       { label: 'Send clipboard to phone', click: () => sendClipboard().catch((e) => note("Couldn't send", e.message)) },
       { type: 'separator' },
     ] : []),
+    { label: 'Settings (push-to-talk)', click: () => openSettings() },
     { label: 'Show shells too', type: 'checkbox', checked: !!cfg.showShells, click: () => { cfg.showShells = !cfg.showShells; push(); } },
     { label: 'Mute notifications', type: 'checkbox', checked: muted, click: () => { muted = !muted; push(); } },
     { label: 'Reload config', click: () => { loadConfig(); place(); startHosts(); } },
@@ -358,6 +361,14 @@ function menuTemplate() {
 // electron.exe + this folder, so login launch works without a packaged build
 function loginItem() {
   return app.isPackaged ? {} : { path: process.execPath, args: [path.resolve(__dirname, '..')] };
+}
+
+function openSettings() {
+  if (size !== 'full') { size = 'full'; place(); }
+  win.show();
+  win.focus();
+  win.webContents.focus();
+  win.webContents.send('expand', 'settings');
 }
 
 function toggle() {
@@ -413,6 +424,8 @@ app.whenReady().then(() => {
   createWindow();
   wt.start();
   startHosts();
+  voiceIpc();
+  applyVoice();
   tray = new Tray(trayIcon());
   tray.setToolTip('openone');
   tray.on('click', toggle);
@@ -729,8 +742,161 @@ function sendToShortcut() {
   } catch {}
 }
 
+// ---------- push-to-talk (voice.js) ----------
+//
+// "voice" in the config: { enabled, trigger, mode: 'hold'|'toggle', target: 'focused' or a
+// pane key (+ targetLabel/targetHost to find it again), enter, beep, stt, model }. Set from
+// the panel's settings view; the trigger is captured by pressing it.
+
+let recWin = null;
+let vState = { state: 'idle', capturing: false, last: null, error: '' }; // state: idle | rec | stt
+let vTrigger = null;
+let vCapture = null;
+let recStarted = 0;
+let recLen = 0;
+let recTimer = null;
+
+const vcfg = () => ({ enabled: false, trigger: null, mode: 'hold', target: 'focused', enter: false, beep: true, stt: '', model: '', ...(cfg.voice || {}) });
+
+function voiceTarget(v) {
+  if (!v.target || v.target === 'focused' || !monitor) return null;
+  const view = monitor.view();
+  return view.find((p) => p.key === v.target) || view.find((p) => p.kind && p.label === v.targetLabel && p.host === v.targetHost) || null;
+}
+
+function voiceView() {
+  const v = vcfg();
+  const p = voiceTarget(v);
+  const focused = !v.target || v.target === 'focused';
+  return {
+    enabled: !!v.enabled, key: voice.label(v.trigger), hasKey: !!(v.trigger && (v.trigger.button || (v.trigger.keys || []).length)),
+    mode: v.mode, target: focused ? 'focused' : v.target, focused,
+    targetLabel: focused ? 'The focused window (paste)' : p ? `${p.label} · ${p.host}` : `${v.targetLabel || v.target} (not running)`,
+    enter: !!v.enter, beep: v.beep !== false, stt: v.stt || '',
+    state: vState.state, capturing: vState.capturing, last: vState.last, error: vState.error || voice.hookProblem(),
+  };
+}
+
+function recorder() {
+  if (recWin && !recWin.isDestroyed()) return recWin;
+  recWin = new BrowserWindow({ show: false, webPreferences: { preload: path.join(__dirname, 'recorder-preload.js'), backgroundThrottling: false } });
+  recWin.loadFile(path.join(__dirname, 'ui', 'recorder.html'));
+  return recWin;
+}
+
+function onVoiceKey(ev) {
+  if (vCapture) {
+    const r = vCapture.feed(ev);
+    if (!r) return;
+    vCapture = null;
+    vState.capturing = false;
+    if (r.trigger) saveVoice({ trigger: r.trigger, enabled: true });
+    else { vState.error = r.error || ''; push(); }
+    return;
+  }
+  if (!vTrigger) return;
+  const r = vTrigger.feed(ev);
+  if (r === 'press') {
+    if (vcfg().mode === 'toggle' && vState.state === 'rec') stopRec(); else startRec();
+  } else if (r === 'release' && vcfg().mode !== 'toggle') stopRec();
+}
+
+function applyVoice() {
+  const v = vcfg();
+  vTrigger = v.enabled && v.trigger ? new voice.Trigger(v.trigger) : null;
+  if (vTrigger || vCapture) {
+    const h = voice.globalHook();
+    if (h) h.on(onVoiceKey);
+    recorder(); // loaded ahead, so the first press records at once
+  }
+  push();
+}
+
+function saveVoice(patch) {
+  const raw = JSON.parse(fs.readFileSync(CONFIG, 'utf8'));
+  raw.voice = { ...(raw.voice || {}), ...patch };
+  fs.writeFileSync(CONFIG, `${JSON.stringify(raw, null, 2)}\n`);
+  cfg.voice = raw.voice;
+  vState.error = '';
+  applyVoice();
+}
+
+function startRec() {
+  if (vState.state === 'rec') return;
+  const w = recorder();
+  vState = { ...vState, state: 'rec', error: '' };
+  recStarted = Date.now();
+  push();
+  const go = () => w.webContents.send('rec:start', { beep: vcfg().beep !== false, mic: vcfg().mic || '' });
+  if (w.webContents.isLoading()) w.webContents.once('did-finish-load', go); else go();
+  clearTimeout(recTimer);
+  recTimer = setTimeout(stopRec, (vcfg().maxSeconds || 180) * 1000);
+}
+
+function stopRec() {
+  if (vState.state !== 'rec') return;
+  clearTimeout(recTimer);
+  recLen = Date.now() - recStarted;
+  vState.state = 'stt';
+  push();
+  recWin.webContents.send('rec:stop', { beep: vcfg().beep !== false });
+}
+
+// paste into whatever has focus, then put the clipboard back
+function pasteText(text, enter) {
+  const h = voice.globalHook();
+  if (!h) throw new Error(`can't type: ${voice.hookProblem()}`);
+  const prevText = clipboard.readText();
+  const prevImage = prevText ? null : clipboard.readImage();
+  clipboard.writeText(text);
+  h.paste(enter);
+  setTimeout(() => {
+    if (clipboard.readText() !== text) return;
+    if (prevText) clipboard.writeText(prevText);
+    else if (prevImage && !prevImage.isEmpty()) clipboard.writeImage(prevImage);
+  }, 1000);
+}
+
+async function heard(audio) {
+  const v = vcfg();
+  if (recLen < 350) { vState.state = 'idle'; push(); return; } // a tap, not speech
+  try {
+    const text = await voice.transcribe({ url: v.stt, model: v.model, audio });
+    if (!text) throw new Error("Didn't catch anything");
+    const p = voiceTarget(v);
+    if (v.target && v.target !== 'focused' && !p) throw new Error(`${v.targetLabel || 'That agent'} isn't running. Heard: ${text}`);
+    if (p) await reply(p.key, text);
+    else pasteText(text, !!v.enter);
+    vState = { ...vState, state: 'idle', last: { text, to: p ? p.label : 'focused window', at: Date.now() } };
+  } catch (e) {
+    vState = { ...vState, state: 'idle', error: e.message };
+    note('Push-to-talk', e.message);
+  }
+  push();
+}
+
+const VOICE_KEYS = ['enabled', 'mode', 'target', 'targetLabel', 'targetHost', 'enter', 'beep', 'stt', 'model'];
+
+function voiceIpc() {
+  ipcMain.on('rec:data', (_e, buf) => heard(Buffer.from(buf)));
+  ipcMain.on('rec:error', (_e, msg) => { vState = { ...vState, state: 'idle', error: msg }; note('Push-to-talk', msg); push(); });
+  ipcMain.handle('voice:set', (_e, patch) => {
+    const clean = {};
+    for (const k of VOICE_KEYS) if (patch && patch[k] !== undefined) clean[k] = patch[k];
+    saveVoice(clean);
+  });
+  ipcMain.handle('voice:capture', () => {
+    if (!voice.globalHook()) throw new Error(`the key listener didn't load: ${voice.hookProblem()}`);
+    vCapture = new voice.Capture();
+    vState = { ...vState, capturing: true, error: '' };
+    applyVoice();
+  });
+  ipcMain.handle('voice:cancel', () => { vCapture = null; vState.capturing = false; push(); });
+}
+
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
+  voice.stopHook();
   wt.stop();
   for (const h of Object.values(hosts)) { h.running = false; if (h.src.close) h.src.close(); }
 });

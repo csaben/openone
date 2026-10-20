@@ -38,6 +38,8 @@ On first run it writes `config.json` (to `%APPDATA%\openone` for an installed co
 
 **Ctrl+Alt+Space** opens the panel on the agent list, with the most urgent agent selected. **j**/**k** (or the arrow keys) move, **Enter** jumps to the pane, **Tab** switches to the inbox of waiting and finished agents, **r** replies, **1**–**9** answer a question and **Esc** closes. **/** searches agents by name, host or words from their conversation; arrows or Ctrl+j/k pick a match and **Enter** jumps to it. Set `hotkey` in the config to change the shortcut. The tray menu has mute, start at login and config.
 
+**Push-to-talk.** Hold a key combo or a mouse button (middle, back or forward), talk, let go: what you said is transcribed by a speech-to-text server (any OpenAI-style `/v1/audio/transcriptions` endpoint, e.g. faster-whisper behind [speaches](https://github.com/speaches-ai/speaches)) and typed into an agent's chat, or pasted into whatever window has focus. Set it up in **Settings**, the mic button in the sidebar (or **l** from the agent list; **h**/**l** move between inbox, agents and settings): pick **Key** and press the combo or button you want, choose hold-to-talk or press-to-start/press-to-stop, pick who it goes to, and set the server URL. It's saved as `"voice"` in the config. The key listener (uiohook) can't hide the keys from other apps, so pick a combo nothing else uses.
+
 **Restart openone** (on the desktop, and in the tray) cycles the app, and the server too when `"server"` is set: it asks the server to restart (`POST /api/restart`; its supervisor, e.g. systemd with `Restart=always`, brings it back), ends every running copy of the app, even a stuck one, and starts a fresh one.
 
 ### Projects

@@ -239,3 +239,18 @@ kbd { font-family: var(--sans); font-size: 10.5px; font-weight: 600; background:
 .row .kind { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .head:has(.pill) h1 { flex: 0 1 auto; min-width: 0; }
 .host .count { color: var(--dim); margin-left: 7px; font-weight: 600; }
+
+/* settings (push-to-talk) */
+.row.setting { cursor: default; }
+.row .sval { color: var(--text); font-size: 12px; max-width: 46%; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: none; }
+.row .sval.listen { color: #ff6b6b; animation: vpulse 1s ease-in-out infinite; }
+.row.setting input { flex: none; width: 56%; font: inherit; font-size: 12px; color: var(--text); background: rgba(255, 255, 255, .06); border: 1px solid rgba(255, 255, 255, .14); border-radius: 7px; padding: 5px 8px; outline: none; }
+.row.cur .nm { color: var(--text); }
+.note.err { color: #ff8a80; margin: 10px 0 0; }
+.setting ~ .note { margin: 10px 0 0; }
+.vlive { font-size: 11px; font-weight: 600; color: var(--muted); margin-left: 6px; }
+.vlive.rec { color: #ff6b6b; }
+/* the mic is open: the tab glows red */
+#root.rec #tab { box-shadow: 0 0 0 2px #ff5252, 0 0 14px 2px rgba(255, 82, 82, .55); animation: vpulse 1.2s ease-in-out infinite; }
+#root.stt #tab { box-shadow: 0 0 0 2px rgba(255, 255, 255, .35); }
+@keyframes vpulse { 50% { opacity: .55; } }

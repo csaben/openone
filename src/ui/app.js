@@ -129,6 +129,10 @@ function renderChrome() {
   $('#b-mute').classList.toggle('muted', !!S.muted);
   $('#b-inbox').classList.toggle('on', expanded && view === 'inbox');
   $('#b-agents').classList.toggle('on', expanded && view === 'agents');
+  if ($('#b-settings')) $('#b-settings').classList.toggle('on', expanded && view === 'settings');
+  const vs = (S.voice || {}).state;
+  root.classList.toggle('rec', vs === 'rec');
+  root.classList.toggle('stt', vs === 'stt');
 }
 
 function inboxCard(items) {
@@ -252,8 +256,140 @@ function agentsCard() {
   const n = inbox().length;
   const hint = query !== null
     ? `<kbd>↑</kbd><kbd>↓</kbd> pick · <kbd>Enter</kbd> ${OPEN_HINT} · <kbd>Esc</kbd> clear`
-    : `<kbd>j</kbd><kbd>k</kbd> pick · <kbd>Enter</kbd> open · <kbd>/</kbd> search · <kbd>n</kbd> project${n ? ` · <kbd>Tab</kbd> inbox` : ''}`;
+    : `<kbd>j</kbd><kbd>k</kbd> pick · <kbd>Enter</kbd> open · <kbd>/</kbd> search · <kbd>n</kbd> project${n ? ` · <kbd>Tab</kbd> inbox` : ''}${HAS_SETTINGS ? ' · <kbd>l</kbd> settings' : ''}`;
   return { html, hint };
+}
+
+// ---------- settings: push-to-talk, reached with h/l like the other views ----------
+//
+// Rows like the agent list: j/k pick, Enter (or Space) changes. "Key" listens for the
+// combo or mouse button you press; "Send to" opens a list of agents.
+
+const HAS_SETTINGS = !WEB && !!window.oo.voiceSet;
+const VIEWS = () => ['inbox', 'agents', ...(HAS_SETTINGS ? ['settings'] : [])].filter((v) => v !== 'inbox' || inbox().length);
+let sk = 0; // selected settings row
+let stPick = null; // "Send to" list: { sel } while open
+let stEdit = false; // editing the speech-to-text URL
+
+const V = () => S.voice || {};
+function settingRows() {
+  const v = V();
+  const on = (b) => (b ? 'On' : 'Off');
+  const rows = [
+    { id: 'enabled', name: 'Push to talk', value: on(v.enabled), sub: v.enabled ? (v.hasKey ? `Hold ${v.key} and talk` : 'Set a key below') : 'Off: the key does nothing' },
+    { id: 'key', name: 'Key', value: v.capturing ? 'Listening…' : v.key, sub: v.capturing ? 'Press the keys together, or a middle/back/forward mouse button. Esc cancels.' : 'Enter, then press the combo or mouse button to use' },
+    { id: 'mode', name: 'Mode', value: v.mode === 'toggle' ? 'Press to start, press to stop' : 'Hold to talk', sub: 'Enter switches' },
+    { id: 'target', name: 'Send to', value: v.targetLabel || 'The focused window (paste)', sub: v.focused ? 'Pasted where your cursor is' : 'Typed into that chat and sent' },
+  ];
+  if (v.focused) rows.push({ id: 'enter', name: 'Press Enter after pasting', value: on(v.enter), sub: 'Sends it in chat apps' });
+  rows.push({ id: 'beep', name: 'Beep when listening', value: on(v.beep), sub: 'A short tone when the mic opens and closes' });
+  rows.push({ id: 'stt', name: 'Speech-to-text server', value: v.stt ? v.stt.replace(/^https?:\/\//, '').replace(/\/v1\/audio\/transcriptions$/, '') : 'Not set', sub: 'An OpenAI-style /v1/audio/transcriptions URL' });
+  return rows;
+}
+
+function targetChoices() {
+  const agents = S.panes.filter((p) => p.kind).sort((a, b) => a.host.localeCompare(b.host) || a.label.localeCompare(b.label));
+  return [{ key: 'focused', label: 'The focused window', sub: 'Paste where your cursor is' },
+    ...agents.map((p) => ({ key: p.key, label: p.label, sub: `${p.kind} · ${p.host}`, p }))];
+}
+
+function settingsCard() {
+  const v = V();
+  const live = v.state === 'rec' ? '<span class="vlive rec">Listening</span>' : v.state === 'stt' ? '<span class="vlive">Transcribing</span>' : '';
+  if (stPick) {
+    const list = targetChoices();
+    stPick.sel = Math.min(stPick.sel, list.length - 1);
+    const rows = list.map((c, i) => `<div class="row ${i === stPick.sel ? 'kb' : ''} ${c.key === v.target ? 'cur' : ''}" data-target="${esc(c.key)}">
+      <span class="st ${c.p ? status(c.p) : 'idle'}"></span>
+      <div class="mid"><div class="t1"><span class="nm">${esc(c.label)}</span></div><div class="t2">${esc(c.sub)}</div></div>
+      ${c.key === v.target ? '<span class="age">current</span>' : ''}</div>`).join('');
+    return {
+      html: `<div class="head"><h1>Send what you say to</h1><button class="x" data-close>${X}</button></div>${rows}`,
+      hint: '<kbd>j</kbd><kbd>k</kbd> pick · <kbd>Enter</kbd> choose · <kbd>Esc</kbd> back',
+    };
+  }
+  const rows = settingRows();
+  sk = Math.max(0, Math.min(sk, rows.length - 1));
+  const html = rows.map((r, i) => {
+    const value = r.id === 'stt' && stEdit
+      ? `<input id="stt" value="${esc(v.stt)}" placeholder="http://host:port/v1/audio/transcriptions" spellcheck="false" autocomplete="off">`
+      : `<span class="sval ${r.id === 'key' && v.capturing ? 'listen' : ''}">${esc(r.value)}</span>`;
+    return `<div class="row setting ${i === sk ? 'kb' : ''}" data-setting="${r.id}">
+      <div class="mid"><div class="t1"><span class="nm">${esc(r.name)}</span></div><div class="t2">${esc(r.sub)}</div></div>${value}</div>`;
+  }).join('');
+  const last = v.error ? `<div class="note err">${esc(v.error)}</div>`
+    : v.last ? `<div class="note">Last: “${esc(v.last.text.slice(0, 140))}” → ${esc(v.last.to)} · ${ago(v.last.at)}</div>` : '';
+  return {
+    html: `<div class="head"><h1>Settings ${live}</h1><button class="x" data-close>${X}</button></div>${html}${last}`,
+    hint: v.capturing ? 'Press the combo or mouse button · <kbd>Esc</kbd> cancel'
+      : stEdit ? '<kbd>Enter</kbd> save · <kbd>Esc</kbd> cancel' : '<kbd>j</kbd><kbd>k</kbd> pick · <kbd>Enter</kbd> change · <kbd>h</kbd> agents',
+  };
+}
+
+function changeSetting(id) {
+  const v = V();
+  const set = (patch) => window.oo.voiceSet(patch).catch((err) => toast(err.message));
+  if (id === 'enabled') { if (!v.hasKey && !v.enabled) window.oo.voiceCapture().catch((err) => toast(err.message)); else set({ enabled: !v.enabled }); }
+  else if (id === 'key') window.oo.voiceCapture().catch((err) => toast(err.message));
+  else if (id === 'mode') set({ mode: v.mode === 'toggle' ? 'hold' : 'toggle' });
+  else if (id === 'target') { stPick = { sel: Math.max(0, targetChoices().findIndex((c) => c.key === v.target)) }; sig = ''; render(); }
+  else if (id === 'enter') set({ enter: !v.enter });
+  else if (id === 'beep') set({ beep: !v.beep });
+  else if (id === 'stt') { stEdit = true; sig = ''; render(); const el = $('#stt'); if (el) { el.focus(); el.select(); } }
+}
+
+function chooseTarget(key) {
+  const c = targetChoices().find((x) => x.key === key);
+  stPick = null;
+  sig = '';
+  if (c) window.oo.voiceSet(c.p ? { target: c.key, targetLabel: c.p.label, targetHost: c.p.host } : { target: 'focused' }).catch((err) => toast(err.message));
+  render();
+}
+
+function saveStt() {
+  const el = $('#stt');
+  stEdit = false;
+  sig = '';
+  if (el) window.oo.voiceSet({ stt: el.value.trim() }).catch((err) => toast(err.message));
+  render();
+}
+
+function settingsKey(e) {
+  const typing = e.target.id === 'stt';
+  if (typing) {
+    if (e.key === 'Enter') { e.preventDefault(); saveStt(); }
+    else if (e.key === 'Escape') { e.preventDefault(); stEdit = false; sig = ''; render(); }
+    return;
+  }
+  if (stPick) {
+    const n = targetChoices().length;
+    if (e.key === 'j' || e.key === 'ArrowDown') { e.preventDefault(); stPick.sel = (stPick.sel + 1) % n; render(); }
+    else if (e.key === 'k' || e.key === 'ArrowUp') { e.preventDefault(); stPick.sel = (stPick.sel - 1 + n) % n; render(); }
+    else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); chooseTarget(targetChoices()[stPick.sel].key); }
+    else if (e.key === 'Escape' || e.key === 'h') { e.preventDefault(); stPick = null; sig = ''; render(); }
+    return;
+  }
+  const rows = settingRows();
+  if (e.key === 'Escape') { e.preventDefault(); collapse(); }
+  else if (e.key === 'j' || e.key === 'ArrowDown') { e.preventDefault(); sk = (sk + 1) % rows.length; render(); }
+  else if (e.key === 'k' || e.key === 'ArrowUp') { e.preventDefault(); sk = (sk - 1 + rows.length) % rows.length; render(); }
+  else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); changeSetting(rows[sk].id); }
+  else if (e.key === 'h' || e.key === 'l') { e.preventDefault(); moveView(e.key === 'l' ? 1 : -1); }
+}
+
+// h/l: inbox <-> agents <-> settings
+function moveView(d) {
+  const vs = VIEWS();
+  const i = vs.indexOf(view === 'inbox' && !inbox().length ? 'agents' : view);
+  const next = vs[Math.max(0, Math.min(vs.length - 1, i + d))];
+  if (!next || next === view) return;
+  view = next;
+  kb = -1;
+  stPick = null;
+  stEdit = false;
+  sig = '';
+  render();
+  if (view === 'agents') selectTop();
 }
 
 // ---------- projects: "n" starts or continues work in a workspace folder ----------
@@ -560,12 +696,13 @@ function render() {
   const items = inbox();
   const showInbox = view === 'inbox' && items.length;
   const projecting = view === 'project' && proj;
-  const { html, hint } = projecting ? projectCard() : showInbox ? inboxCard(items) : agentsCard();
-  const next = `${projecting ? 'p' : showInbox ? 'i' : 'a'}|${html}|${hint}`;
+  const setting = view === 'settings' && HAS_SETTINGS;
+  const { html, hint } = projecting ? projectCard() : setting ? settingsCard() : showInbox ? inboxCard(items) : agentsCard();
+  const next = `${projecting ? 'p' : setting ? 's' : showInbox ? 'i' : 'a'}|${html}|${hint}`;
   if (next !== sig) {
     // keep the reply or search box focused, caret and all, across the rebuild
     const a = document.activeElement;
-    const focused = a && ['reply', 'q', 'pq', 'pn'].includes(a.id) ? a.id : null;
+    const focused = a && ['reply', 'q', 'pq', 'pn', 'stt'].includes(a.id) ? a.id : null;
     const caret = focused ? a.selectionStart : 0;
     const top = body.scrollTop;
     body.innerHTML = html;
@@ -575,8 +712,9 @@ function render() {
     const el = focused && document.getElementById(focused);
     if (el) { el.focus(); el.setSelectionRange(caret, caret); }
   }
-  $('#b-inbox').classList.toggle('on', !!showInbox && !projecting);
-  $('#b-agents').classList.toggle('on', !showInbox && !projecting);
+  $('#b-inbox').classList.toggle('on', !!showInbox && !projecting && !setting);
+  $('#b-agents').classList.toggle('on', !showInbox && !projecting && !setting);
+  if ($('#b-settings')) $('#b-settings').classList.toggle('on', setting);
   layout();
 }
 
@@ -590,7 +728,7 @@ function showHint(on) {
 
 function layout() {
   const card = $('#card').getBoundingClientRect();
-  const btn = ($('#b-inbox').classList.contains('on') ? $('#b-inbox') : $('#b-agents')).getBoundingClientRect();
+  const btn = (['#b-inbox', '#b-settings'].map((q) => $(q)).find((b) => b && b.classList.contains('on')) || $('#b-agents')).getBoundingClientRect();
   const y = btn.top + btn.height / 2 - card.top - 6;
   $('.caret').style.top = `${Math.max(16, Math.min(card.height - 28, y))}px`;
   $('#hint').style.top = `${card.bottom + 12}px`;
@@ -619,6 +757,9 @@ function collapse() {
   expanded = false;
   query = null;
   tidy = null;
+  stPick = null;
+  stEdit = false;
+  if ((S.voice || {}).capturing && window.oo.voiceCancel) window.oo.voiceCancel();
   if (proj) { proj = null; view = 'agents'; }
   root.classList.replace('expanded', 'collapsed');
   showHint(false);
@@ -724,6 +865,8 @@ $('#tab').addEventListener('click', () => expand());
 $('#peek').addEventListener('click', () => expand('inbox', peekKey));
 $('#b-inbox').addEventListener('click', () => { view = 'inbox'; sig = ''; render(); });
 $('#b-agents').addEventListener('click', () => { view = 'agents'; kb = -1; sig = ''; render(); });
+if (HAS_SETTINGS) $('#b-settings').addEventListener('click', () => { if (!expanded) expand('settings'); else { view = 'settings'; sig = ''; render(); } });
+else $('#b-settings').remove();
 $('#b-mute').addEventListener('click', () => window.oo.mute());
 $('#b-more').addEventListener('click', () => window.oo.menu());
 $('#b-term').addEventListener('click', () => {
@@ -732,8 +875,10 @@ $('#b-term').addEventListener('click', () => {
 });
 
 body.addEventListener('click', (e) => {
-  const t = e.target.closest('[data-close],[data-jump],[data-n],[data-send],[data-cur],[data-proj],[data-row],[data-start],[data-code],[data-ask],[data-sleep],[data-wake],[data-forget],[data-pick],[data-tidy],[data-tidy-go],[data-tidy-x]');
+  const t = e.target.closest('[data-setting],[data-target],[data-close],[data-jump],[data-n],[data-send],[data-cur],[data-proj],[data-row],[data-start],[data-code],[data-ask],[data-sleep],[data-wake],[data-forget],[data-pick],[data-tidy],[data-tidy-go],[data-tidy-x]');
   if (!t) return;
+  if (t.dataset.setting) { sk = settingRows().findIndex((r) => r.id === t.dataset.setting); if (!stEdit || t.dataset.setting !== 'stt') changeSetting(t.dataset.setting); return; }
+  if (t.dataset.target) { chooseTarget(t.dataset.target); return; }
   if (t.dataset.sleep) { e.stopPropagation(); sleepAgents([t.dataset.sleep]); return; }
   if (t.dataset.wake) { wake(t.dataset.wake); return; }
   if (t.dataset.forget) { window.oo.forgetSleeping(t.dataset.forget).catch((err) => toast(err.message)); return; }
@@ -799,6 +944,9 @@ document.addEventListener('keydown', (e) => {
   const typing = e.target.tagName === 'INPUT';
   if (e.target.id === 'q') return searchKey(e);
   if (view === 'project' && proj) return projectKey(e);
+  // listening for a new push-to-talk key: the keys are for that, not for the panel
+  if ((S.voice || {}).capturing) { e.preventDefault(); return; }
+  if (view === 'settings' && HAS_SETTINGS) return settingsKey(e);
   if (e.key === 'Escape' && tidy) { tidy = null; render(); return; }
   if (e.key === 'Escape' && query !== null && !typing) { closeSearch(); return; }
   if (e.key === 'Escape') { if (typing) e.target.blur(); else collapse(); return; }
@@ -810,6 +958,7 @@ document.addEventListener('keydown', (e) => {
   if (p && p.state === 'input' && /^[1-9]$/.test(e.key) && (p.options || []).some((o) => o.n === Number(e.key))) {
     answer(p.key, Number(e.key));
   } else if (e.key === 'Tab' || e.key === 'a') { e.preventDefault(); switchView(); }
+  else if (e.key === 'h' || e.key === 'l') { e.preventDefault(); moveView(e.key === 'l' ? 1 : -1); }
   else if (e.key === 'ArrowDown' || e.key === 'ArrowRight' || e.key === 'j') { e.preventDefault(); step(1); }
   else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft' || e.key === 'k') { e.preventDefault(); step(-1); }
   else if (e.key === 'Enter') {
@@ -839,7 +988,7 @@ document.addEventListener('keydown', (e) => {
 window.oo.on('state', (s) => { S = s; render(); });
 window.oo.on('peek', peek);
 window.oo.on('collapse', collapse);
-window.oo.on('expand', () => expand('agents'));
+window.oo.on('expand', (v) => expand(v === 'settings' && HAS_SETTINGS ? 'settings' : 'agents'));
 function toast(msg) {
   const t = $('#toast');
   t.textContent = msg;
