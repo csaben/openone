@@ -8,4 +8,8 @@ contextBridge.exposeInMainWorld('ooRec', {
   data: (buf) => ipcRenderer.send('rec:data', buf),
   error: (msg) => ipcRenderer.send('rec:error', String(msg)),
   level: (v) => ipcRenderer.send('rec:level', v),
+  // agents speaking (speak): play one part, say when it ends
+  onPlay: (fn) => ipcRenderer.on('play', (_e, o) => fn(o || {})),
+  onPlayStop: (fn) => ipcRenderer.on('play:stop', () => fn()),
+  played: (id, error) => ipcRenderer.send('play:done', id, error || ''),
 });

@@ -140,6 +140,7 @@ const INSTRUCTIONS = 'openone sees every Claude and Codex agent running in tmux/
   'with an optional first message. ask puts a question with buttons on the user\'s phone (approve this, pick one) ' +
   'and waits for the tap; use it instead of stopping to wait for the user when one quick decision unblocks you. ' +
   'board_read and board_draw share a whiteboard with the user: read it when they say they drew something for you, draw on it to sketch a diagram for them. ' +
+  'A user message that starts with [voice] was spoken (push-to-talk): answer in text as usual, then also call speak with a short spoken version, since they may be away from the screen. ' +
   'resources shows what is using RAM, CPU and GPU on each host (per pane and per service); sleep and wake put idle agents away and bring them back.';
 
 const TOOLS = [
@@ -247,6 +248,14 @@ TOOLS.push(
     inputSchema: { type: 'object', properties: { host: { type: 'string', description: 'Only this host (default: all).' } } },
   },
   {
+    name: 'speak',
+    description: 'Say something out loud to the user, in a voice, on their computer. Use it when their message started with [voice] (they talked to you), once, at the end of your turn; or mid-task when you need them (a question, an approval) and they may not be looking. ' +
+      'Write for the ear, not the screen: one to three short sentences, usually under 40 words. Lead with the answer or what you need from them. ' +
+      'No code, file paths, URLs, ids, markdown or lists; round numbers ("about six gigs"); name things the way a person would say them. ' +
+      'Do not read your text reply aloud: say the gist and point to the screen for detail ("the list is on screen"). It plays right away; their push-to-talk key cuts it off.',
+    inputSchema: { type: 'object', properties: { text: { type: 'string', description: 'What to say, as you would say it.' } }, required: ['text'] },
+  },
+  {
     name: 'sleep',
     description: 'Put an idle agent to sleep: exit it (as /exit would), close its window and remember how to resume its conversation. Frees its memory. Only idle agents (not working, not waiting on the user). Undo with wake. Only when the user asks or agrees.',
     inputSchema: { type: 'object', properties: { name: { type: 'string', description: 'Agent name from roster.' } }, required: ['name'] },
@@ -325,6 +334,14 @@ async function run(name, a, who) {
     return `Started ${r.name}. ${r.note}.`;
   }
   if (name === 'resources') return resourcesText(await call('GET', 'resources', { host: a.host }, who));
+  if (name === 'speak') {
+    const r = await fetch(`${URL_}/api/speak`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: a.text, from: await myName(who) }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || `openone server: HTTP ${r.status}`);
+    return `Speaking (${j.parts} part${j.parts === 1 ? '' : 's'}); it plays on the user's computer as each is ready.`;
+  }
   if (name === 'sleep') {
     const r = await call('POST', 'sleep', { name: a.name }, who);
     return `${r.label}@${r.host} is asleep${r.resume ? '' : " (it didn't print a resume id, so wake continues its folder's latest conversation)"}. Wake it with wake "${r.label}".`;

@@ -1,0 +1,48 @@
+const test = require('node:test');
+const assert = require('node:assert');
+const { Speech, sentences } = require('../src/speech');
+
+test('speech: text splits at sentence ends, short ones ride together, long ones are cut', () => {
+  assert.deepEqual(sentences('Done. The board is cleared. Want me to redraw it?'),
+    ['Done.', 'The board is cleared. Want me to redraw it?']);
+  assert.deepEqual(sentences('  '), []);
+  const long = `${'word '.repeat(60)}end.`;
+  const parts = sentences(long, 100);
+  assert.ok(parts.length >= 3);
+  assert.ok(parts.every((p) => p.length <= 101));
+  assert.equal(parts.join(' ').replace(/\s+/g, ' '), long.trim());
+  assert.deepEqual(sentences('No punctuation at all'), ['No punctuation at all']);
+});
+
+test('speech: parts come out in order, each once, as soon as the ones before are taken', async () => {
+  const gates = [];
+  const sp = new Speech({ synth: (text) => new Promise((r) => gates.push(() => r({ audio: Buffer.from(text), mime: 'audio/mpeg' }))) });
+  const { parts } = sp.say({ text: 'The first sentence is long enough that it will not be merged with anything else around it. The second sentence is also long enough that it stays a part of its own here. The third sentence closes it out and is also long enough to stand by itself.', from: 'a@h' });
+  assert.equal(parts, 3);
+  assert.deepEqual(sp.take('desk'), []); // nothing made yet
+  await new Promise((r) => setImmediate(r));
+  gates.shift()();
+  await new Promise((r) => setImmediate(r));
+  const first = sp.take('desk');
+  assert.deepEqual(first.map((x) => x.seq), [0]);
+  assert.equal(first[0].from, 'a@h');
+  assert.deepEqual(sp.take('phone'), []); // already taken
+  assert.equal(String(sp.audio(first[0].id).audio), first[0].text);
+  gates.shift()();
+  await new Promise((r) => setImmediate(r));
+  gates.shift()();
+  await new Promise((r) => setImmediate(r));
+  assert.deepEqual(sp.take('desk').map((x) => x.seq), [1, 2]);
+  sp.done(first[0].id);
+  assert.equal(sp.audio(first[0].id), null);
+});
+
+test('speech: a failed part is skipped, and without a tts service it says so', async () => {
+  let n = 0;
+  const sp = new Speech({ synth: async () => { if (n++ === 0) throw new Error('boom'); return { audio: Buffer.from('x'), mime: 'audio/mpeg' }; } });
+  sp.say({ text: 'This first sentence will fail to synthesize. The second sentence works fine though.' });
+  await new Promise((r) => setTimeout(r, 10));
+  assert.deepEqual(sp.take('desk').map((x) => x.seq), [1]);
+  assert.throws(() => new Speech().say({ text: 'hi' }), /tts/);
+  assert.throws(() => sp.say({ text: '' }), /nothing to say/);
+});

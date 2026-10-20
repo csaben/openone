@@ -79,3 +79,28 @@ window.ooRec.onStop(({ beep }) => {
   clearInterval(meter);
   rec.stop();
 });
+
+// ---------- playing what agents say ----------
+let playing = null;
+window.ooRec.onPlay(({ id, audio, mime }) => {
+  if (playing) { playing.el.pause(); URL.revokeObjectURL(playing.url); }
+  const url = URL.createObjectURL(new Blob([audio], { type: mime || 'audio/mpeg' }));
+  const el = new Audio(url);
+  playing = { id, el, url };
+  const end = (err) => {
+    if (!playing || playing.id !== id) return;
+    URL.revokeObjectURL(url);
+    playing = null;
+    window.ooRec.played(id, err);
+  };
+  el.onended = () => end();
+  el.onerror = () => end('could not play it');
+  el.play().catch((e) => end(e.message));
+});
+window.ooRec.onPlayStop(() => {
+  if (!playing) return;
+  playing.el.pause();
+  URL.revokeObjectURL(playing.url);
+  window.ooRec.played(playing.id, 'stopped');
+  playing = null;
+});

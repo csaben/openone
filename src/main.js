@@ -479,7 +479,7 @@ app.whenReady().then(() => {
     }
   }
   restartShortcut();
-  if (cfg.server) { pollMessages(); pollDrops(); sendToShortcut(); sendFilesFromArgs(process.argv); }
+  if (cfg.server) { pollMessages(); pollDrops(); pollSpeech(); sendToShortcut(); sendFilesFromArgs(process.argv); }
 });
 
 // "server": "https://..." — the openone server that carries messages between agents.
@@ -860,6 +860,7 @@ function saveVoice(patch) {
 
 function startRec() {
   if (vState.state === 'rec') return;
+  stopSpeaking(); // talking over it cuts it off
   const w = recorder();
   vState = { ...vState, state: 'rec', error: '' };
   recStarted = Date.now();
@@ -913,7 +914,8 @@ async function heard(audio) {
     if (!text) throw new Error("Didn't catch anything");
     const p = voiceTarget(v);
     if (v.target && v.target !== 'focused' && !p) throw new Error(`${v.targetLabel || 'That agent'} isn't running. Heard: ${text}`);
-    if (p) await reply(p.key, text);
+    // agents answer a [voice] message out loud too (see speak in mcp.js)
+    if (p) await reply(p.key, `${v.tag ?? '[voice] '}${text}`);
     else pasteText(text, !!v.enter);
     vState = { ...vState, state: 'idle', last: { text, to: p ? p.label : 'focused window', at: Date.now() } };
     vlog(`sent to ${p ? p.key : 'focused window'}`);
@@ -926,12 +928,56 @@ async function heard(audio) {
   push();
 }
 
-const VOICE_KEYS = ['enabled', 'mode', 'target', 'targetLabel', 'targetHost', 'enter', 'beep', 'stt', 'model'];
+// ---------- agents speaking (speak, speech.js on the server) ----------
+const playQueue = [];
+let nowPlaying = null;
+
+async function pollSpeech() {
+  if (vcfg().speak === false) return;
+  for (;;) {
+    try {
+      const r = await fetch(`${serverUrl()}/api/speak?for=${encodeURIComponent(dropName())}&wait=25`, { signal: AbortSignal.timeout(40000) });
+      if (r.ok) {
+        for (const part of await r.json()) {
+          const a = await fetch(`${serverUrl()}/api/speak/${encodeURIComponent(part.id)}/audio`, { signal: AbortSignal.timeout(20000) });
+          if (!a.ok) continue;
+          playQueue.push({ ...part, audio: await a.arrayBuffer() });
+          vlog(`speak ${part.from} ${part.seq + 1}/${part.of}: ${part.text}`);
+          playNext();
+        }
+      } else await sleep(5000);
+    } catch { await sleep(5000); }
+  }
+}
+
+function playNext() {
+  if (nowPlaying || !playQueue.length) return;
+  if (vState.state === 'rec') { playQueue.length = 0; return; }
+  nowPlaying = playQueue.shift();
+  const w = recorder();
+  const go = () => w.webContents.send('play', { id: nowPlaying.id, audio: nowPlaying.audio, mime: nowPlaying.mime });
+  if (w.webContents.isLoading()) w.webContents.once('did-finish-load', go); else go();
+  pill({ mode: 'speak', title: String(nowPlaying.from || 'openone').replace(/@.*/, ''), detail: nowPlaying.text });
+}
+
+function stopSpeaking() {
+  playQueue.length = 0;
+  if (nowPlaying && recWin && !recWin.isDestroyed()) recWin.webContents.send('play:stop');
+}
+
+const VOICE_KEYS = ['enabled', 'mode', 'target', 'targetLabel', 'targetHost', 'enter', 'beep', 'stt', 'model', 'speak'];
 
 function voiceIpc() {
   ipcMain.on('rec:data', (_e, buf) => heard(Buffer.from(buf)));
   ipcMain.on('rec:error', (_e, msg) => { vState = { ...vState, state: 'idle', error: msg }; vlog(`mic error: ${msg}`); pill({ mode: 'err', title: "Couldn't open the mic", detail: msg }); push(); });
   ipcMain.on('rec:started', () => { vlog(`mic open after ${Date.now() - recStarted} ms`); if (vState.state === 'rec') pill({ mode: 'rec', title: 'Listening', detail: voice.label(vcfg().trigger) }); });
+  ipcMain.on('play:done', (_e, id, err) => {
+    if (err && err !== 'stopped') vlog(`play error: ${err}`);
+    fetch(`${serverUrl()}/api/speak/${encodeURIComponent(id)}`, { method: 'DELETE' }).catch(() => {});
+    nowPlaying = null;
+    if (playQueue.length) playNext();
+    else if (vState.state === 'idle') pillTimer = setTimeout(() => pill({ mode: 'hide' }), 1200);
+  });
   ipcMain.on('rec:level', (_e, v) => { if (pillWin && !pillWin.isDestroyed()) pillWin.webContents.send('level', v); });
   ipcMain.handle('voice:set', (_e, patch) => {
     const clean = {};

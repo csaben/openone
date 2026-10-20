@@ -21,6 +21,7 @@ const { Suggester, runCodex, buildPrompt, msUntil } = require('../src/suggest');
 const { Drops } = require('../src/drops');
 const { Board } = require('../src/board');
 const resources = require('../src/resources');
+const { Speech, httpSynth } = require('../src/speech');
 
 
 const ROOT = path.join(__dirname, '..');
@@ -65,6 +66,8 @@ const sleepers = new Sleepers({ file: cfg.sleepFile || path.join(require('os').h
 const drops = new Drops({ dir: path.join(require('os').homedir(), '.local', 'state', 'openone', 'drops'), onChange: () => pushState() });
 setInterval(() => drops.sweep(), 3600000);
 // the shared whiteboard (src/board.js); pages hear "board" on the event stream when it changes
+// agents talking back (speak): audio made by the "tts" service, played by a desktop app
+const speech = new Speech({ synth: httpSynth(cfg.tts) });
 const board = new Board({ dir: path.join(require('os').homedir(), '.local', 'state', 'openone', 'board'), onChange: (v) => broadcast('board', { version: v }) });
 let boardViewers = 0; // board pages connected right now
 const polled = new Map(); // ask id -> last time someone long-polled it
@@ -303,6 +306,7 @@ async function api(req, res, parts) {
     if (m === 'DELETE' && !c) { sleepers.take(id); pushState(); return send(res, 200, { ok: true }); }
   }
   if (a === 'board') return boardApi(req, res, b, c);
+  if (a === 'speak') return speakApi(req, res, b ? decodeURIComponent(b) : '', c);
   if (a === 'drops' || (m === 'GET' && a === 'devices')) return dropsApi(req, res, a, b ? decodeURIComponent(b) : '', c);
   if (m === 'GET' && a === 'app') return send(res, 200, await latestApp());
   if (a === 'suggest' && !b) {
@@ -537,6 +541,35 @@ async function boardApi(req, res, what, id) {
     return send(res, 200, { ok: true });
   }
   if (m === 'POST' && what === 'clear') { board.clear(); return send(res, 200, { version: board.version }); }
+  return send(res, 404, { error: 'not found' });
+}
+
+// ---------- speak ----------
+//
+//   POST   /api/speak            { text, from }   say it out loud on the user's computer
+//   GET    /api/speak?for=&wait=25               parts ready to play (each goes to one taker)
+//   GET    /api/speak/:id/audio                  a part's audio
+//   DELETE /api/speak/:id                        played
+
+async function speakApi(req, res, id, action) {
+  const m = req.method;
+  const q = new URL(req.url, 'http://x').searchParams;
+  if (!id && m === 'POST') {
+    const body = await readJson(req);
+    try { return send(res, 200, speech.say({ text: body.text, from: body.from })); }
+    catch (e) { return send(res, e.code || 500, { error: e.message }); }
+  }
+  if (!id && m === 'GET') {
+    let list = speech.take(q.get('for') || 'someone');
+    const wait = Math.min(Number(q.get('wait')) || 0, 55);
+    if (!list.length && wait) { await speech.wait(wait * 1000); list = speech.take(q.get('for') || 'someone'); }
+    return send(res, 200, list);
+  }
+  if (id && m === 'GET' && action === 'audio') {
+    const it = speech.audio(id);
+    return it ? send(res, 200, it.audio, it.mime) : send(res, 404, { error: 'gone' });
+  }
+  if (id && m === 'DELETE') { speech.done(id); return send(res, 200, { ok: true }); }
   return send(res, 404, { error: 'not found' });
 }
 
