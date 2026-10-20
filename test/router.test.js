@@ -76,6 +76,18 @@ test('Router: the default is the first of "to" that is running, by key or name',
   assert.equal(r2.defaultTo(AGENTS), '');
 });
 
+test('Router: says where each note went, unless confirm is off', async (t) => {
+  const said = [];
+  const r = new Router({ cfg: { url: 'http://llm', to: 'shop@desk' }, roster: () => AGENTS, send: () => ({}), confirm: (s) => said.push(s) });
+  t.mock.method(globalThis, 'fetch', async () => ({ ok: true, json: async () => ({ choices: [{ message: { content: '{"route":"note"}' } }] }) }));
+  await r.route({ text: 'Claude, ship it' });
+  await r.route({ text: 'what a day' });
+  assert.deepEqual(said, ['Sent to shop.', 'Noted.']);
+  const quiet = new Router({ cfg: { confirm: false, to: 'shop@desk' }, roster: () => AGENTS, send: () => ({}), confirm: (s) => said.push(s) });
+  await quiet.route({ text: 'Claude, ship it' });
+  assert.equal(said.length, 2);
+});
+
 test('typedLine: the user\'s relayed words are typed as they are', () => {
   assert.equal(typedLine({ content: '[ring] check the build', from: 'voice', user: true }), '[ring] check the build');
 });

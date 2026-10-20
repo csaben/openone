@@ -27,12 +27,15 @@ function cue(text) {
 const SYSTEM = `You sort the user's spoken notes. Each one was recorded on a ring and transcribed by speech
 recognition (expect filler words and mis-heard words). Decide where it goes:
 
-- "agent": the user is talking TO one of their AI coding agents: an instruction or request ("check
+- "agent": the user is talking TO one of their AI agents: an instruction or request ("check
   why the build failed", "can you add a button"), a question for it, or a reply to what it last
-  said ("yeah do that", "no, the other one"). Pick which agent from the roster; when it's not clear
-  which, use the default agent.
+  said ("yeah do that", "no, the other one"). A note that muses first and then asks for something
+  to be done or answered ("figure that out", "look into it", "tell me", "report back", "let me
+  know", "can you ...", "find out why ...") is "agent", even when the ask comes at the very end.
+  Pick which agent from the roster; when it's not clear which, use the default agent.
 - "note": anything else. Thoughts, ideas, observations, journal entries, things to remember, plans
-  and to-dos for themself, talk about other people. Most notes are this. When unsure, choose "note".
+  and to-dos for themself ("I need to ...", "remember to ..."), feature ideas without a request to
+  act now, talk about other people. Most notes are this. When unsure, choose "note".
 
 Reply with JSON only: {"route": "agent" or "note", "to": "<agent name from the roster, or empty>", "why": "<a few words>"}`;
 
@@ -60,12 +63,19 @@ function parse(content, agentNames, defaultTo) {
 
 class Router {
   // cfg: the "router" config; roster(): agents; send(to, text): delivers;
-  // resolve(nameOrKey): the running agent's name, or ''
-  constructor({ cfg = {}, roster, send, resolve }) {
+  // resolve(nameOrKey): the running agent's name, or ''; confirm(text): says where it went
+  // out loud ("Sent to shop." / "Noted."), unless cfg.confirm is false
+  constructor({ cfg = {}, roster, send, resolve, confirm }) {
     this.cfg = cfg;
     this.roster = roster;
     this.sendTo = send;
     this.resolve = resolve || ((t) => t);
+    this.confirm = cfg.confirm === false ? null : confirm;
+  }
+
+  tell(out) {
+    if (!this.confirm) return;
+    try { this.confirm(out.route === 'agent' ? `Sent to ${out.to.split('@')[0].split('.')[0]}.` : 'Noted.'); } catch {}
   }
 
   defaultTo(agents) {
@@ -112,10 +122,13 @@ class Router {
       try {
         out.sent = this.sendTo(out.to, `[${source}] ${out.text || clean}`);
       } catch (e) {
-        return { route: 'note', to: '', why: `couldn't send: ${String(e.message || e)}`, ms: Date.now() - t0 };
+        const failed = { route: 'note', to: '', why: `couldn't send: ${String(e.message || e)}`, ms: Date.now() - t0 };
+        this.tell(failed);
+        return failed;
       }
     }
     delete out.text;
+    this.tell(out);
     return { ...out, ms: Date.now() - t0 };
   }
 }
