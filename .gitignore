@@ -9,3 +9,4 @@ dist/
 # stray screenshots dropped in the repo root
 /*.png
 server/config.json
+.env
