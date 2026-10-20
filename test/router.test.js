@@ -81,11 +81,36 @@ test('Router: says where each note went, unless confirm is off', async (t) => {
   const r = new Router({ cfg: { url: 'http://llm', to: 'shop@desk' }, roster: () => AGENTS, send: () => ({}), confirm: (s) => said.push(s) });
   t.mock.method(globalThis, 'fetch', async () => ({ ok: true, json: async () => ({ choices: [{ message: { content: '{"route":"note"}' } }] }) }));
   await r.route({ text: 'Claude, ship it' });
+  r.sent = [];
   await r.route({ text: 'what a day' });
   assert.deepEqual(said, ['Sent to shop.', 'Noted.']);
   const quiet = new Router({ cfg: { confirm: false, to: 'shop@desk' }, roster: () => AGENTS, send: () => ({}), confirm: (s) => said.push(s) });
   await quiet.route({ text: 'Claude, ship it' });
   assert.equal(said.length, 2);
+});
+
+test('Router: recent notes sent to agents go to the model, so follow-ups stay in the conversation', async (t) => {
+  const bodies = [];
+  const r = new Router({ cfg: { url: 'http://llm', to: 'shop@desk' }, roster: () => AGENTS, send: () => ({}) });
+  t.mock.method(globalThis, 'fetch', async (u, o) => { bodies.push(JSON.parse(o.body)); return { ok: true, json: async () => ({ choices: [{ message: { content: '{"route":"note"}' } }] }) }; });
+  await r.route({ text: 'Claude, plan the move to the fast drive' });
+  r.sent[0].at -= 11 * 60000; // past the sticky window, so the model decides
+  await r.route({ text: 'is any of this worth it for me' });
+  assert.match(bodies[0].messages[1].content, /Recent notes the user sent to agents:\n- 11 min ago, to shop@desk: plan the move to the fast drive/);
+  const [user] = messages('x', AGENTS, 'shop@desk').slice(1);
+  assert.doesNotMatch(user.content, /Recent notes/);
+});
+
+test('Router: within the sticky window a note follows the last one to its agent; "note" opts out', async (t) => {
+  const sent = [];
+  const r = new Router({ cfg: { url: 'http://llm', to: 'shop@desk' }, roster: () => AGENTS, send: (to, text) => sent.push([to, text]) });
+  t.mock.method(globalThis, 'fetch', async () => ({ ok: true, json: async () => ({ choices: [{ message: { content: '{"route":"agent","to":"api@box"}' } }] }) }));
+  await r.route({ text: 'deploy the api' }); // model -> api@box
+  const out = await r.route({ text: 'hmm I wonder if that is worth it' });
+  assert.equal(out.to, 'api@box');
+  assert.equal(out.why, 'follows a note sent to it');
+  assert.equal((await r.route({ text: 'note to self, buy milk' })).route, 'note');
+  assert.equal(sent.length, 2);
 });
 
 test('typedLine: the user\'s relayed words are typed as they are', () => {

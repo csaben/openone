@@ -33,20 +33,27 @@ recognition (expect filler words and mis-heard words). Decide where it goes:
   to be done or answered ("figure that out", "look into it", "tell me", "report back", "let me
   know", "can you ...", "find out why ...") is "agent", even when the ask comes at the very end.
   Pick which agent from the roster; when it's not clear which, use the default agent.
+  The user talks to agents in a run of notes: if a recent note went to an agent and this one
+  follows on from it (same subject, a follow-up question, a reaction to what the agent said or
+  is working on), it is "agent", to that same agent, even when it sounds like thinking aloud.
 - "note": anything else. Thoughts, ideas, observations, journal entries, things to remember, plans
   and to-dos for themself ("I need to ...", "remember to ..."), feature ideas without a request to
   act now, talk about other people. Most notes are this. When unsure, choose "note".
 
 Reply with JSON only: {"route": "agent" or "note", "to": "<agent name from the roster, or empty>", "why": "<a few words>"}`;
 
-// agents: roster entries { name, kind, title, summary, state }
-function messages(text, agents, defaultTo) {
+// agents: roster entries { name, kind, title, summary, state }; recent: notes sent to agents
+// lately, { to, text, mins }
+function messages(text, agents, defaultTo, recent = []) {
   const line = (a) => `- ${a.name} (${a.kind}${a.name === defaultTo ? ', the default' : ''})${a.title ? `: ${a.title}` : ''}` +
-    `${a.summary ? ` | last said: ${String(a.summary).replace(/\s+/g, ' ').slice(0, 160)}` : ''}`;
+    `${a.summary ? ` | last said: ${String(a.summary).replace(/\s+/g, ' ').slice(0, 300)}` : ''}`;
   const roster = agents.map(line).join('\n') || '(no agents running)';
+  const lately = recent.length
+    ? `\n\nRecent notes the user sent to agents:\n${recent.map((r) => `- ${r.mins} min ago, to ${r.to}: ${String(r.text).replace(/\s+/g, ' ').slice(0, 300)}`).join('\n')}`
+    : '';
   return [
     { role: 'system', content: SYSTEM },
-    { role: 'user', content: `Default agent: ${defaultTo || '(none)'}\nRoster:\n${roster}\n\nNote:\n${String(text).slice(0, 4000)}` },
+    { role: 'user', content: `Default agent: ${defaultTo || '(none)'}\nRoster:\n${roster}${lately}\n\nNote:\n${String(text).slice(0, 4000)}` },
   ];
 }
 
@@ -71,6 +78,12 @@ class Router {
     this.sendTo = send;
     this.resolve = resolve || ((t) => t);
     this.confirm = cfg.confirm === false ? null : confirm;
+    this.sent = []; // { to, text, at }: notes that went to agents, for follow-ups
+  }
+
+  recent(now = Date.now()) {
+    this.sent = this.sent.filter((r) => now - r.at < 20 * 60000).slice(-3);
+    return this.sent.map((r) => ({ to: r.to, text: r.text, mins: Math.max(1, Math.round((now - r.at) / 60000)) }));
   }
 
   tell(out) {
@@ -91,6 +104,10 @@ class Router {
     const names = agents.map((a) => a.name);
     const c = cue(text);
     if (c) return c.route === 'agent' ? { route: defaultTo ? 'agent' : 'note', to: defaultTo, why: c.why, text: c.text } : { route: 'note', to: '', why: c.why };
+    // mid-conversation: a note soon after one that went to an agent goes there too ("note" opts out)
+    const last = this.sent[this.sent.length - 1];
+    const sticky = (this.cfg.stickyMin ?? 10) * 60000;
+    if (last && Date.now() - last.at < sticky && names.includes(last.to)) return { route: 'agent', to: last.to, why: 'follows a note sent to it' };
     if (!this.cfg.url) return { route: 'note', to: '', why: 'no router model configured' };
     try {
       const r = await fetch(this.cfg.url, {
@@ -98,7 +115,7 @@ class Router {
         headers: { 'content-type': 'application/json', ...(this.cfg.apiKey ? { authorization: `Bearer ${this.cfg.apiKey}` } : {}) },
         body: JSON.stringify({
           model: this.cfg.model, temperature: 0, max_tokens: 120,
-          response_format: { type: 'json_object' }, messages: messages(text, agents, defaultTo),
+          response_format: { type: 'json_object' }, messages: messages(text, agents, defaultTo, this.recent()),
         }),
         signal: AbortSignal.timeout(this.cfg.timeoutMs || 4000),
       });
@@ -121,6 +138,7 @@ class Router {
     if (out.route === 'agent') {
       try {
         out.sent = this.sendTo(out.to, `[${source}] ${out.text || clean}`);
+        this.sent.push({ to: out.to, text: out.text || clean, at: Date.now() });
       } catch (e) {
         const failed = { route: 'note', to: '', why: `couldn't send: ${String(e.message || e)}`, ms: Date.now() - t0 };
         this.tell(failed);
