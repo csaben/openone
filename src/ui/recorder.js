@@ -82,10 +82,12 @@ window.ooRec.onStop(({ beep }) => {
 
 // ---------- playing what agents say ----------
 let playing = null;
-window.ooRec.onPlay(({ id, audio, mime }) => {
+window.ooRec.onPlay(({ id, audio, mime, speed }) => {
   if (playing) { playing.el.pause(); URL.revokeObjectURL(playing.url); }
   const url = URL.createObjectURL(new Blob([audio], { type: mime || 'audio/mpeg' }));
   const el = new Audio(url);
+  el.playbackRate = speed || 1; // pitch is kept, only faster
+  el.preservesPitch = true;
   playing = { id, el, url };
   const end = (err) => {
     if (!playing || playing.id !== id) return;

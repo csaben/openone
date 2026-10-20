@@ -772,7 +772,7 @@ function voiceView() {
     enabled: !!v.enabled, key: voice.label(v.trigger), hasKey: !!(v.trigger && (v.trigger.button || (v.trigger.keys || []).length)),
     mode: v.mode, target: focused ? 'focused' : v.target, focused,
     targetLabel: focused ? 'The focused window (paste)' : p ? `${p.label} · ${p.host}` : `${v.targetLabel || v.target} (not running)`,
-    enter: !!v.enter, beep: v.beep !== false, stt: v.stt || '',
+    enter: !!v.enter, beep: v.beep !== false, stt: v.stt || '', speed: voiceSpeed(),
     state: vState.state, capturing: vState.capturing, last: vState.last, error: vState.error || voice.hookProblem(),
   };
 }
@@ -955,7 +955,7 @@ function playNext() {
   if (vState.state === 'rec') { playQueue.length = 0; return; }
   nowPlaying = playQueue.shift();
   const w = recorder();
-  const go = () => w.webContents.send('play', { id: nowPlaying.id, audio: nowPlaying.audio, mime: nowPlaying.mime });
+  const go = () => w.webContents.send('play', { id: nowPlaying.id, audio: nowPlaying.audio, mime: nowPlaying.mime, speed: voiceSpeed() });
   if (w.webContents.isLoading()) w.webContents.once('did-finish-load', go); else go();
   pill({ mode: 'speak', title: String(nowPlaying.from || 'openone').replace(/@.*/, ''), detail: nowPlaying.text });
 }
@@ -965,7 +965,10 @@ function stopSpeaking() {
   if (nowPlaying && recWin && !recWin.isDestroyed()) recWin.webContents.send('play:stop');
 }
 
-const VOICE_KEYS = ['enabled', 'mode', 'target', 'targetLabel', 'targetHost', 'enter', 'beep', 'stt', 'model', 'speak'];
+// how fast agents talk: 2x unless set ("speed" in "voice")
+const voiceSpeed = () => Math.min(4, Math.max(0.5, Number(vcfg().speed) || 2));
+
+const VOICE_KEYS = ['speed', 'enabled', 'mode', 'target', 'targetLabel', 'targetHost', 'enter', 'beep', 'stt', 'model', 'speak'];
 
 function voiceIpc() {
   ipcMain.on('rec:data', (_e, buf) => heard(Buffer.from(buf)));
