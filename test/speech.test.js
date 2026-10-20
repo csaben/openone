@@ -96,3 +96,11 @@ test('speech: device sends it to the phone or the desktop whatever the target', 
   assert.deepEqual(s.take('desk'), []);
   assert.equal(s.take('phone').length, 1);
 });
+
+test('speech: by default, headphones on the phone win even at an active desktop', () => {
+  const s = new Speech({});
+  s.seen('desk', { kind: 'desktop', idleMs: 0 });
+  assert.equal(s.target(), 'desktop');
+  s.seen('phone', { kind: 'phone', headset: true });
+  assert.equal(s.target(), 'phone');
+});

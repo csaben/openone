@@ -33,14 +33,15 @@ function sentences(text, maxLen = 220) {
   return out;
 }
 
-// Which device plays it. Desktops poll with how long you've been idle there; a phone polls only
-// while headphones are connected (it never plays on its speaker). The phone gets it when it
-// has headphones and no desktop has seen you for awayMs (you're out); otherwise the desktop.
+// Which device plays it. A phone polls only while headphones are connected to it (it never
+// plays on its speaker), and headphones on the phone mean that's where you are: it gets it.
+// Otherwise a desktop. awayMs > 0 adds a condition: only once no desktop has seen you for that
+// long (desktops poll with their idle time).
 // A device that hasn't polled for a minute doesn't count.
 const SEEN_MS = 70000;
 
 class Speech {
-  constructor({ synth, now = Date.now, awayMs = 180000 } = {}) {
+  constructor({ synth, now = Date.now, awayMs = 0 } = {}) {
     this.synth = synth; // async (text) -> { audio: Buffer, mime }
     this.now = now;
     this.awayMs = awayMs;
