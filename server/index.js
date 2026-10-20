@@ -591,6 +591,10 @@ async function speakApi(req, res, id, action) {
     try { return send(res, 200, speech.say({ text: body.text, from: body.from })); }
     catch (e) { return send(res, e.code || 500, { error: e.message }); }
   }
+  if (id === 'devices' && m === 'GET') {
+    const t = Date.now();
+    return send(res, 200, { target: speech.target(), devices: [...speech.devices].map(([name, d]) => ({ name, ...d, seenSecAgo: Math.round((t - d.at) / 1000) })) });
+  }
   if (!id && m === 'GET') {
     // ?for=<device>&kind=desktop&idle=<ms> | ?for=phone&kind=phone&headset=1
     const by = q.get('for') || 'someone';
