@@ -10,14 +10,16 @@
 //   to: the default agent: a name, a pane key, or a list of them (the first one running wins)
 
 const NOTE_CUES = /^\s*(?:(?:a\s+)?note\s+to\s+self|note|memo|journal)\b[\s,:.-]*/i;
-const AGENT_CUES = /^\s*(?:hey\s+|ok(?:ay)?\s+|yo\s+)?(?:claude|codex|agent|openone|open\s+one|zero\s+one)\b[\s,:.-]*/i;
+const AGENT_CUES = /^\s*(?:hey\s+|ok(?:ay)?\s+|yo\s+)?(?:claude|codex|agent)\b[\s,:.-]*/i;
+// "zero one" (openone's name, as speech recognition writes it) within the first few words
+const NAME_CUE = /^\s*(?:[\w']+[\s,.]+){0,4}?(?:zero[\s-]?one|open[\s-]?(?:one|1)|0[\s-]?1|oh[\s-]one)\b[\s,:.!?-]*/i;
 
 // -> { route, why, text } when a cue decides it, else null
 function cue(text) {
   const t = String(text || '');
   let m = t.match(NOTE_CUES);
   if (m) return { route: 'note', why: 'starts with a note cue', text: t };
-  m = t.match(AGENT_CUES);
+  m = t.match(AGENT_CUES) || t.match(NAME_CUE);
   if (m) return { route: 'agent', why: 'addressed to an agent', text: t.slice(m[0].length) || t };
   return null;
 }

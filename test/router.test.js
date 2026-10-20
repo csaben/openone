@@ -13,6 +13,12 @@ test('cue: spoken cues decide without the model', () => {
   assert.equal(cue('note: the light was nice').route, 'note');
   assert.deepEqual(cue('Hey Claude, check the build'), { route: 'agent', why: 'addressed to an agent', text: 'check the build' });
   assert.equal(cue('Codex: run the tests').route, 'agent');
+  assert.equal(cue('Zero one, check the build').text, 'check the build');
+  assert.equal(cue('Okay so zero one: what broke?').text, 'what broke?');
+  assert.equal(cue('Um, hey, open 1 ship it').text, 'ship it');
+  assert.equal(cue('Zero-one. Ship it').text, 'Ship it');
+  assert.equal(cue('Hey, 01, ship it').text, 'ship it');
+  assert.equal(cue('I went to the store and bought zero one things'), null);
   assert.equal(cue('Notably the build is slow'), null);
   assert.equal(cue('I think the claude thing is neat'), null);
 });
