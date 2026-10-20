@@ -277,7 +277,8 @@ function resourcesText(r) {
     const big = h.panes.filter((p) => p.rss >= 50 << 20);
     if (big.length) out.push('  Panes, biggest first:');
     for (const p of big.slice(0, 15)) {
-      const who = p.name ? `${p.name} (${p.kind}, ${p.state}${p.idleMin ? ` ${ago(p.idleMin * 60000)}` : ''})` : `shell ${p.where}${p.label ? ` ${p.label}` : ''}`;
+      const who = p.name ? `${p.name} (${p.kind}, ${p.state}${p.idleMin ? ` ${ago(p.idleMin * 60000)}` : ''})`
+        : p.guess ? `window ${p.where} (${p.guess}, not in roster, so sleep can't reach it)` : `shell ${p.where}`;
       out.push(`    ${who}: ${gb(p.rss)} RAM${p.gpu ? `, ${gb(p.gpu)} GPU` : ''}${p.cpu >= 1 ? `, ${Math.round(p.cpu)}% CPU` : ''}` +
         ` [${p.top.map((t) => `${t.name}${t.count > 1 ? ` x${t.count}` : ''} ${gb(t.rss)}`).join(', ')}]`);
     }

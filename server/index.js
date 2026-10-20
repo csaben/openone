@@ -400,13 +400,12 @@ async function busApi(req, res, what) {
         await sleep(1000);
         const b = await h.src.processes();
         const dt = (Date.now() - ta) / 1000;
-        const panes = [...pids].map(([sp, pid]) => {
+        const panes = [...pids].map(([sp, { pid, window }]) => {
           const key = `${h.cfg.name}|${sp}`;
           const p = view.get(key) || {};
-          const [session, paneId] = sp.split('|');
           return {
             key, pid, name: nm.get(key) || '', kind: p.kind || null, state: p.state || '', since: p.since || 0,
-            label: p.label || '', path: p.path || '', where: `${session}:${p.windowIndex ?? '?'} ${paneId}`,
+            label: p.label || '', path: p.path || '', where: window,
           };
         });
         return { host: h.cfg.name, ...resources.summarize({ sample: b, cpu: resources.cpuRates(a, b, dt), panes }) };

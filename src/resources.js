@@ -120,6 +120,8 @@ function summarize({ sample, cpu = new Map(), panes = [], now = Date.now() }) {
       rss: list.reduce((s, q) => s + q.rss, 0),
       cpu: list.reduce((s, q) => s + (cpu.get(q.pid) || 0), 0),
       gpu: list.reduce((s, q) => s + (gpu.get(q.pid) || 0), 0),
+      // an agent openone doesn't track (started in a way it doesn't recognize)
+      guess: p.kind ? '' : (list.find((q) => /^(claude|codex)$/i.test(q.name)) || {}).name || '',
       idleMin: p.state === 'idle' || p.state === 'done' ? Math.round((now - (p.since || now)) / 60000) : 0,
       top: [...byName.values()].sort((x, y) => y.rss - x.rss).slice(0, 4),
     });

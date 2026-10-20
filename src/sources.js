@@ -204,13 +204,13 @@ class TmuxSource {
 
   async keys(p, keys) { await this.batch([['send-keys', '-t', this.target(p), ...keys]]); }
 
-  // "session|%id" -> the pid of the program the pane started (its shell, usually)
+  // "session|%id" -> { pid, window }: the program the pane started (its shell, usually)
   async panePids() {
-    const [list] = await this.batch([['list-panes', '-a', '-F', ['#{session_name}', '#{pane_id}', '#{pane_pid}'].join(SEP)]]);
+    const [list] = await this.batch([['list-panes', '-a', '-F', ['#{session_name}', '#{pane_id}', '#{pane_pid}', '#{window_index}', '#{window_name}'].join(SEP)]]);
     const out = new Map();
     for (const line of String(list).split('\n')) {
-      const [s, id, pid] = line.replace(/\r$/, '').split(SEP);
-      if (id && id.startsWith('%') && Number(pid)) out.set(`${s}|${id}`, Number(pid));
+      const [s, id, pid, wi, wn] = line.replace(/\r$/, '').split(SEP);
+      if (id && id.startsWith('%') && Number(pid)) out.set(`${s}|${id}`, { pid: Number(pid), window: `${s}:${wi} ${wn || ''}`.trim() });
     }
     return out;
   }
