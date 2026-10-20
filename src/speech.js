@@ -105,7 +105,7 @@ class Speech {
 function httpSynth(tts) {
   if (!tts || !tts.url) return null;
   const format = tts.format || 'mp3';
-  // longest first, so "openone@inari" wins over "openone"
+  // longest first, so "openone@desk" wins over "openone"
   const say = Object.entries(tts.say || {}).sort((a, b) => b[0].length - a[0].length)
     .map(([w, as]) => [new RegExp(`(?<![\\w@])${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w@])`, 'gi'), as]);
   return async (raw) => {
