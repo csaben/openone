@@ -42,6 +42,7 @@ function names(panes) {
 // The one line typed into a pane. Newlines would submit early, so they become " ⏎ ".
 function typedLine(m) {
   const body = String(m.content).replace(/\r/g, '').split('\n').map((l) => l.trimEnd()).join(' ⏎ ').trim();
+  if (m.user) return body; // the user's own words, relayed (a spoken note): typed as they are
   if (m.note) return `[openone] ${body}`; // from openone itself (an answer to your ask): nothing to reply to
   return `[openone message from ${m.from} · answer with the openone send tool, to="${m.from}"] ${body}`;
 }
@@ -112,8 +113,8 @@ class Bus {
 
   // from: the sender's pane record, or null with fromName for a caller outside any pane
   // -> the logged message. Throws on a bad target, the hop limit or the rate limit.
-  // note: from openone itself, typed without "answer with send"
-  send({ from, fromName, to, content, note = false }) {
+  // note: from openone itself, typed without "answer with send"; user: the user's words, typed as is
+  send({ from, fromName, to, content, note = false, user = false }) {
     const text = String(content || '').trim();
     if (!text) throw new Error('empty message');
     if (text.length > 8000) throw new Error('message too long (8000 characters max); put long content in a file and send its path');
@@ -136,7 +137,7 @@ class Bus {
       id: ++this.seq, at: now, hop,
       from: from ? nm.get(from.key) : (fromName || 'someone outside openone'), fromKey: from ? from.key : null,
       to: nm.get(target.key), toKey: target.key,
-      content: text, status: 'queued', via: null, deliveredAt: 0, error: '', note: !!note || undefined,
+      content: text, status: 'queued', via: null, deliveredAt: 0, error: '', note: !!note || undefined, user: !!user || undefined,
     };
     this.log.push(m);
     if (this.log.length > LOG) this.log.splice(0, this.log.length - LOG);

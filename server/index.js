@@ -22,6 +22,7 @@ const { Drops } = require('../src/drops');
 const { Board } = require('../src/board');
 const resources = require('../src/resources');
 const { Speech, httpSynth } = require('../src/speech');
+const { Router } = require('../src/router');
 
 
 const ROOT = path.join(__dirname, '..');
@@ -68,6 +69,12 @@ setInterval(() => drops.sweep(), 3600000);
 // the shared whiteboard (src/board.js); pages hear "board" on the event stream when it changes
 // agents talking back (speak): audio made by the "tts" service, played by a desktop app
 const speech = new Speech({ synth: httpSynth(cfg.tts) });
+// spoken notes (a ring, a phone): kept as a note, or typed to an agent (src/router.js)
+const router = new Router({
+  cfg: cfg.router || {},
+  roster: () => bus.roster(null),
+  send: (to, text) => { const m = bus.send({ fromName: 'voice', to, content: text, user: true }); pushState(); return { id: m.id, to: m.to, status: m.status }; },
+});
 const board = new Board({ dir: path.join(require('os').homedir(), '.local', 'state', 'openone', 'board'), onChange: (v) => broadcast('board', { version: v }) });
 let boardViewers = 0; // board pages connected right now
 const polled = new Map(); // ask id -> last time someone long-polled it
@@ -307,6 +314,10 @@ async function api(req, res, parts) {
   }
   if (a === 'board') return boardApi(req, res, b, c);
   if (a === 'speak') return speakApi(req, res, b ? decodeURIComponent(b) : '', c);
+  if (m === 'POST' && a === 'route' && !b) {
+    const body = await readJson(req);
+    return send(res, 200, await router.route({ text: body.text, source: String(body.source || 'ring').replace(/[^\w-]/g, '') || 'ring' }));
+  }
   if (a === 'drops' || (m === 'GET' && a === 'devices')) return dropsApi(req, res, a, b ? decodeURIComponent(b) : '', c);
   if (m === 'GET' && a === 'app') return send(res, 200, await latestApp());
   if (a === 'suggest' && !b) {
