@@ -65,12 +65,13 @@ class Speech {
   }
 
   // -> { group, parts }: made in the background, in order
-  say({ text, from = '' }) {
+  // device: 'phone' or 'desktop' to send it there whatever target() says (a test, a reply meant for the road)
+  say({ text, from = '', device = '' }) {
     if (!this.synth) throw Object.assign(new Error('no text-to-speech service: set "tts" in the server config'), { code: 400 });
     const parts = sentences(String(text || '').slice(0, 4000));
     if (!parts.length) throw Object.assign(new Error('nothing to say'), { code: 400 });
     const group = crypto.randomBytes(5).toString('hex');
-    const items = parts.map((t, seq) => ({ id: `${group}-${seq}`, group, seq, of: parts.length, from: String(from || ''), text: t, at: this.now(), status: 'making' }));
+    const items = parts.map((t, seq) => ({ id: `${group}-${seq}`, group, seq, of: parts.length, from: String(from || ''), text: t, at: this.now(), status: 'making', device: device === 'phone' || device === 'desktop' ? device : '' }));
     this.items.push(...items);
     (async () => {
       for (const it of items) {
@@ -99,10 +100,12 @@ class Speech {
   take(by) {
     this.prune();
     const me = this.devices.get(by);
-    if ((me ? me.kind : 'desktop') !== this.target()) return [];
+    const kind = me ? me.kind : 'desktop';
+    const mine = kind === this.target();
     const out = [];
     for (const it of this.items) {
       if (it.claimed || it.status === 'making') continue;
+      if (it.device ? it.device !== kind : !mine) continue;
       const before = this.items.filter((x) => x.group === it.group && x.seq < it.seq);
       if (before.some((x) => x.status === 'making' || (!x.claimed && x.status === 'ready'))) continue;
       if (it.status === 'failed') { it.claimed = by; continue; }

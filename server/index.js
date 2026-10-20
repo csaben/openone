@@ -588,7 +588,7 @@ async function speakApi(req, res, id, action) {
   const q = new URL(req.url, 'http://x').searchParams;
   if (!id && m === 'POST') {
     const body = await readJson(req);
-    try { return send(res, 200, speech.say({ text: body.text, from: body.from })); }
+    try { return send(res, 200, speech.say({ text: body.text, from: body.from, device: body.device })); }
     catch (e) { return send(res, e.code || 500, { error: e.message }); }
   }
   if (id === 'devices' && m === 'GET') {

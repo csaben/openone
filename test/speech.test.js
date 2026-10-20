@@ -86,3 +86,13 @@ test('speech goes to the phone only with headphones on and the desktops left alo
   s2.seen('phone', { kind: 'phone', headset: true });
   assert.equal(s2.target(), 'phone');
 });
+
+test('speech: device sends it to the phone or the desktop whatever the target', async () => {
+  const s = new Speech({ synth: async () => ({ audio: Buffer.from('a'), mime: 'audio/mpeg' }) });
+  s.seen('desk', { kind: 'desktop', idleMs: 0 });
+  s.seen('phone', { kind: 'phone', headset: true });
+  s.say({ text: 'For the road.', device: 'phone' });
+  await new Promise((r) => setImmediate(r));
+  assert.deepEqual(s.take('desk'), []);
+  assert.equal(s.take('phone').length, 1);
+});
