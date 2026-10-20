@@ -282,7 +282,7 @@ function settingRows() {
     { id: 'target', name: 'Send to', value: v.targetLabel || 'The focused window (paste)', sub: v.focused ? 'Pasted where your cursor is' : 'Typed into that chat and sent' },
   ];
   if (v.focused) rows.push({ id: 'enter', name: 'Press Enter after pasting', value: on(v.enter), sub: 'Sends it in chat apps' });
-  rows.push({ id: 'speed', name: 'Voice speed', value: `${v.speed || 2}x`, sub: 'How fast agents talk back · Enter goes faster, Backspace slower' });
+  rows.push({ id: 'speed', name: 'Voice speed', value: `${v.speed || 1.75}x`, sub: 'How fast agents talk back · Enter goes faster, Backspace slower' });
   rows.push({ id: 'beep', name: 'Beep when listening', value: on(v.beep), sub: 'A short tone when the mic opens and closes' });
   rows.push({ id: 'stt', name: 'Speech-to-text server', value: v.stt ? v.stt.replace(/^https?:\/\//, '').replace(/\/v1\/audio\/transcriptions$/, '') : 'Not set', sub: 'An OpenAI-style /v1/audio/transcriptions URL' });
   return rows;
@@ -336,7 +336,7 @@ function changeSetting(id) {
   else if (id === 'target') { stPick = { sel: Math.max(0, targetChoices().findIndex((c) => c.key === v.target)) }; sig = ''; render(); }
   else if (id === 'enter') set({ enter: !v.enter });
   else if (id === 'beep') set({ beep: !v.beep });
-  else if (id === 'speed') set({ speed: nextSpeed(v.speed || 2, 1) });
+  else if (id === 'speed') set({ speed: nextSpeed(v.speed || 1.75, 1) });
   else if (id === 'stt') { stEdit = true; sig = ''; render(); const el = $('#stt'); if (el) { el.focus(); el.select(); } }
 }
 
@@ -384,7 +384,7 @@ function settingsKey(e) {
   else if (e.key === 'j' || e.key === 'ArrowDown') { e.preventDefault(); sk = (sk + 1) % rows.length; render(); }
   else if (e.key === 'k' || e.key === 'ArrowUp') { e.preventDefault(); sk = (sk - 1 + rows.length) % rows.length; render(); }
   else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); changeSetting(rows[sk].id); }
-  else if (e.key === 'Backspace' && rows[sk].id === 'speed') { e.preventDefault(); window.oo.voiceSet({ speed: nextSpeed(V().speed || 2, -1) }).catch((err) => toast(err.message)); }
+  else if (e.key === 'Backspace' && rows[sk].id === 'speed') { e.preventDefault(); window.oo.voiceSet({ speed: nextSpeed(V().speed || 1.75, -1) }).catch((err) => toast(err.message)); }
   else if (e.key === 'h' || e.key === 'l') { e.preventDefault(); moveView(e.key === 'l' ? 1 : -1); }
 }
 

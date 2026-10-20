@@ -965,8 +965,8 @@ function stopSpeaking() {
   if (nowPlaying && recWin && !recWin.isDestroyed()) recWin.webContents.send('play:stop');
 }
 
-// how fast agents talk: 2x unless set ("speed" in "voice")
-const voiceSpeed = () => Math.min(4, Math.max(0.5, Number(vcfg().speed) || 2));
+// how fast agents talk: 1.75x unless set ("speed" in "voice")
+const voiceSpeed = () => Math.min(4, Math.max(0.5, Number(vcfg().speed) || 1.75));
 
 const VOICE_KEYS = ['speed', 'enabled', 'mode', 'target', 'targetLabel', 'targetHost', 'enter', 'beep', 'stt', 'model', 'speak'];
 
