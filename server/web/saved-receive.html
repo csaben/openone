@@ -1,0 +1,27 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Saved Posts Receiver</title>
+<style>body{margin:0;padding:16px;font:14px system-ui,sans-serif;background:#0c0a09;color:#f5f5f4}</style></head>
+<body><div id="s">Waiting for posts from x.com…</div>
+<script>
+// x.com can't talk to this server itself (its security policy), but it can open this page and
+// postMessage to it; this page relays to its own server and answers back.
+//   { tweets, kind, front } -> saved      { getTodo: true } -> { todo }
+const s = document.getElementById('s');
+addEventListener('message', async (e) => {
+  if (e.origin !== 'https://x.com' || !e.data) return;
+  const reply = (m) => e.source.postMessage({ ...m, seq: e.data.seq }, e.origin);
+  try {
+    if (e.data.getTodo) {
+      const r = await fetch('api/saved/todo').then((x) => x.json());
+      return reply({ bmTodo: r.todo });
+    }
+    if (!Array.isArray(e.data.tweets)) return;
+    const r = await fetch('api/saved/ingest', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ tweets: e.data.tweets, kind: e.data.kind || 'bookmark', front: !!e.data.front }) }).then((x) => x.json());
+    s.textContent = `Saved: ${r.total} ${r.kind === 'like' ? 'likes' : 'bookmarks'} (${r.added} new) at ${new Date().toLocaleTimeString()}`;
+    reply({ bmSaved: r });
+  } catch (err) {
+    reply({ bmError: String(err) });
+  }
+});
+if (opener) opener.postMessage({ bmReady: true }, 'https://x.com');
+</script></body></html>

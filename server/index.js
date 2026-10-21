@@ -20,6 +20,7 @@ const { Sleepers, sleepAgent, wakeAgent } = require('../src/sleep');
 const { Suggester, runCodex, buildPrompt, msUntil } = require('../src/suggest');
 const { Drops } = require('../src/drops');
 const { Board } = require('../src/board');
+const { Saved } = require('../src/saved');
 const resources = require('../src/resources');
 const { Speech, httpSynth } = require('../src/speech');
 const { Router } = require('../src/router');
@@ -93,6 +94,8 @@ const router = new Router({
   send: (to, text) => { const m = bus.send({ fromName: 'voice', to, content: text, user: true }); pushState(); return { id: m.id, to: m.to, status: m.status }; },
 });
 const board = new Board({ dir: path.join(require('os').homedir(), '.local', 'state', 'openone', 'board'), onChange: (v) => broadcast('board', { version: v }) });
+// your saved X posts (src/saved.js), searched on /saved
+const saved = new Saved({ dir: path.join(require('os').homedir(), '.local', 'state', 'openone', 'saved'), embedder });
 let boardViewers = 0; // board pages connected right now
 const polled = new Map(); // ask id -> last time someone long-polled it
 setInterval(() => asks.sweep(), 15000);
@@ -330,6 +333,7 @@ async function api(req, res, parts) {
     if (m === 'DELETE' && !c) { sleepers.take(id); pushState(); return send(res, 200, { ok: true }); }
   }
   if (a === 'board') return boardApi(req, res, b, c);
+  if (a === 'saved') return savedApi(req, res, b);
   if (a === 'speak') return speakApi(req, res, b ? decodeURIComponent(b) : '', c);
   if (m === 'POST' && a === 'route' && !b) {
     const body = await readJson(req);
@@ -518,6 +522,25 @@ async function busApi(req, res, what) {
     req.on('close', () => { clearInterval(beat); off(); });
     return;
   }
+  return send(res, 404, { error: 'not found' });
+}
+
+// ---------- saved posts ----------
+//   GET  /api/saved/recent?kind=all|bookmark|like&order=newest|oldest&offset=&n=   { results, total }
+//   GET  /api/saved/search?q=&kind=&n=     { results } best match first
+//   GET  /api/saved/todo                   { todo } posts whose thread hasn't been read
+//   POST /api/saved/ingest                 { tweets, kind, front } from x.com, via /saved-receive
+async function savedApi(req, res, what) {
+  const q = new URL(req.url, 'http://x').searchParams;
+  const m = req.method;
+  if (m === 'GET' && what === 'recent') {
+    return send(res, 200, saved.recent({ kind: q.get('kind') || 'all', order: q.get('order') || 'newest', offset: Number(q.get('offset')) || 0, n: Math.min(Number(q.get('n')) || 40, 200) }));
+  }
+  if (m === 'GET' && what === 'search') {
+    return send(res, 200, { results: await saved.search(q.get('q') || '', { kind: q.get('kind') || 'all', n: Math.min(Number(q.get('n')) || 24, 100) }) });
+  }
+  if (m === 'GET' && what === 'todo') return send(res, 200, { todo: saved.todo() });
+  if (m === 'POST' && what === 'ingest') return send(res, 200, saved.ingest(await readJson(req, 20e6)));
   return send(res, 404, { error: 'not found' });
 }
 
@@ -816,6 +839,9 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/board/') { res.writeHead(301, { location: '../board' }); return res.end(); } // its links are relative
     if (!file && url.pathname === '/board') file = path.join(__dirname, 'web', 'board.html');
     if (!file && url.pathname === '/board.js') file = path.join(__dirname, 'web', 'board.js');
+    // saved posts, and the page x.com hands them to
+    if (!file && url.pathname === '/saved') file = path.join(__dirname, 'web', 'saved.html');
+    if (!file && url.pathname === '/saved-receive') file = path.join(__dirname, 'web', 'saved-receive.html');
     if (file && fs.existsSync(file)) return send(res, 200, fs.readFileSync(file), TYPES[path.extname(file)] || 'application/octet-stream');
     return send(res, 404, 'not found', 'text/plain');
   } catch (e) {
@@ -837,4 +863,5 @@ for (const dir of [path.join(ROOT, 'src', 'ui'), path.join(__dirname, 'web')]) {
 
 server.listen(PORT, cfg.bind || '127.0.0.1', () => {
   console.log(`openone server on http://${cfg.bind || '127.0.0.1'}:${PORT} watching ${Object.keys(hosts).join(', ')}`);
+  saved.warm();
 });

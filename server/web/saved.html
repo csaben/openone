@@ -1,0 +1,229 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Saved Posts</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;800&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#f5f5f4;--fg:#1c1917;--mute:#78716c;--card:#fff;--line:#e7e5e4;--acc:#2563eb;--sel:#2563eb22}
+@media (prefers-color-scheme:dark){:root{--bg:#0c0a09;--fg:#f5f5f4;--mute:#a8a29e;--card:#16130f;--line:#2b2724;--acc:#60a5fa;--sel:#60a5fa26}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/20px Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+.ic{width:18px;height:18px;vertical-align:-4px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.nav .ic{width:22px;height:22px;margin-right:10px;vertical-align:-6px}
+/* left: the controls; right: search on top, results under it */
+body{display:grid;grid-template-columns:220px minmax(0,1fr);min-height:100vh}
+.side{position:sticky;top:0;height:100vh;box-sizing:border-box;padding:22px 14px;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:18px;overflow:auto}
+.brand{font-size:20px;font-weight:800;padding:0 10px}
+.lbl{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--mute);padding:0 10px 4px}
+.nav{display:flex;flex-direction:column;gap:2px}
+.nav button{font:inherit;font-size:17px;text-align:left;padding:9px 12px;border:0;border-radius:999px;background:none;color:var(--fg);cursor:pointer}
+.nav button:hover{background:var(--line)}
+.nav button.on{font-weight:700;background:var(--line)}
+.keys{margin-top:auto;font-size:11px;line-height:1.5;color:var(--mute);padding:0 10px}
+.wrap{min-width:0}
+main{max-width:1100px;margin:0 auto;padding:6px 20px 24px}
+.bar{position:sticky;top:0;padding:16px 20px 12px;background:var(--bg);z-index:2;max-width:1100px;margin:0 auto}
+@media (max-width:760px){body{display:block}.side{position:static;height:auto;flex-direction:row;flex-wrap:wrap;border-right:0;border-bottom:1px solid var(--line);padding:12px}.nav{flex-direction:row}.keys,.brand{display:none}}
+input{width:100%;box-sizing:border-box;font:inherit;font-size:20px;padding:14px 18px;border:1px solid var(--line);border-radius:14px;background:var(--card);color:var(--fg);outline:none;box-shadow:0 4px 18px #0000000f}
+input:focus{border-color:var(--mute)}
+.seg{display:flex;border:1px solid var(--line);border-radius:12px;overflow:hidden;flex:none}
+.seg button{font:inherit;padding:10px 14px;border:0;background:var(--card);color:var(--mute);cursor:pointer}
+.seg button.on{background:var(--fg);color:var(--bg)}
+#s{color:var(--mute);font-size:12px;padding:0 10px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px;margin-top:6px}
+.c{display:flex;flex-direction:column;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden;color:inherit;text-decoration:none;transition:transform .08s}
+.c:hover,.c.on{border-color:var(--acc);background:linear-gradient(var(--sel),var(--sel)),var(--card)}
+.p.on{background:linear-gradient(var(--sel),var(--sel)),var(--card)}
+.c:hover,.c.on{transform:translateY(-1px)}
+.th{aspect-ratio:16/10;background:var(--line) center/cover no-repeat;position:relative}
+.th.none{display:flex;align-items:center;justify-content:center;font-size:13px;color:var(--mute);padding:14px;text-align:center;overflow:hidden}
+.tag{position:absolute;background:#000a;color:#fff;font-size:11px;border-radius:6px;padding:2px 6px}
+.b{padding:10px 12px;display:flex;flex-direction:column;gap:6px}
+.who{display:flex;align-items:center;gap:8px;color:var(--mute);font-size:12px;min-width:0}
+.who img{width:20px;height:20px;border-radius:50%;flex:none}
+.who span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.t4{display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
+.l{font-size:12px;color:var(--acc);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hint{color:var(--mute);font-size:12px;text-align:center;margin-top:40px}
+/* posts view: drawn like the post on X */
+body.posts main,body.posts .bar{max-width:640px}
+/* gallery: whole posts in as many columns as fit, each card as tall as its media */
+.masonry{columns:330px;column-gap:14px}
+.masonry .p{break-inside:avoid;margin-bottom:14px;border:1px solid var(--line);border-radius:16px;background:var(--card)}
+/* posts view: a single X-style timeline column, posts divided by hairlines */
+.feed{max-width:600px;margin:6px auto 0;border:1px solid var(--line);border-bottom:0;background:var(--card)}
+.p{display:flex;gap:12px;padding:12px 16px;border-bottom:1px solid var(--line);font-size:15px;line-height:20px;cursor:pointer}
+.p:hover{background:linear-gradient(#80808010,#80808010),var(--card)}
+.p>.av{width:40px;height:40px;border-radius:50%;flex:none}
+.pb{flex:1;min-width:0}
+.ph{display:flex;gap:6px;align-items:baseline;flex-wrap:wrap}
+.ph b{font-weight:700}.ph .m{color:var(--mute)}
+.ph a{color:inherit;text-decoration:none}
+.tx{white-space:pre-wrap;word-wrap:break-word;margin:4px 0 0}
+.tx a{color:var(--acc);text-decoration:none}
+.md{display:grid;gap:2px;border-radius:16px;overflow:hidden;margin-top:12px;border:1px solid var(--line)}
+.md.n2,.md.n4{grid-template-columns:1fr 1fr}.md.n3{grid-template-columns:1fr 1fr}
+.md .im{position:relative;background:var(--line) center/cover no-repeat;min-height:160px}
+.md.n1 .im{min-height:0}
+.md.n1 img{display:block;width:100%;height:auto;max-height:640px;object-fit:contain;background:#000}
+.md .play{position:absolute;inset:0;margin:auto;width:54px;height:54px;border-radius:50%;background:#1d9bf0;display:flex;align-items:center;justify-content:center;color:#fff;font-size:22px}
+.cd{display:block;border:1px solid var(--line);border-radius:16px;overflow:hidden;margin-top:12px;color:inherit;text-decoration:none}
+.cd img{display:block;width:100%;max-height:300px;object-fit:cover}
+.cd div{padding:10px 12px}.cd .m{color:var(--mute);font-size:12px}
+.q{border:1px solid var(--line);border-radius:16px;padding:12px;margin-top:12px;font-size:15px}
+.q .md{margin-top:8px}
+.rp{border-left:3px solid var(--acc);padding:6px 10px;margin-top:10px;font-size:13px}
+.rp .m{color:var(--mute);font-size:12px}
+.ct{display:flex;justify-content:space-between;max-width:425px;color:var(--mute);font-size:13px;margin-top:12px}
+.ct a{color:var(--mute);text-decoration:none}
+</style></head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-bm" viewBox="0 0 24 24"><path d="M6 3.5h12v17l-6-4.2-6 4.2z"/></symbol>
+  <symbol id="i-like" viewBox="0 0 24 24"><path d="M12 20.5s-8-4.6-8-10.4A4.4 4.4 0 0 1 12 7.6a4.4 4.4 0 0 1 8 2.5c0 5.8-8 10.4-8 10.4z"/></symbol>
+  <symbol id="i-reply" viewBox="0 0 24 24"><path d="M4.5 11.5a7.5 7 0 0 1 7.5-7h0a7.5 7 0 0 1 0 14H10l-4.5 3v-4a7 7 0 0 1-1-6z"/></symbol>
+  <symbol id="i-rt" viewBox="0 0 24 24"><path d="M4.5 9V7.5a2 2 0 0 1 2-2h11l-3-3M19.5 15v1.5a2 2 0 0 1-2 2h-11l3 3M17.5 5.5l-3 3M6.5 18.5l3-3"/></symbol>
+  <symbol id="i-views" viewBox="0 0 24 24"><path d="M5 20V12M10 20V5M15 20v-9M20 20v-5"/></symbol>
+</svg>
+<aside class="side">
+  <div class="brand">Saved</div>
+  <div class="grp"><div class="lbl">Show</div><div class="nav" id="kinds"><button data-k="all">All</button><button data-k="bookmark"><svg class="ic"><use href="#i-bm"/></svg>Bookmarks</button><button data-k="like"><svg class="ic"><use href="#i-like"/></svg>Likes</button></div></div>
+  <div class="grp"><div class="lbl">Order</div><div class="nav"><button id="ord" class="on" title="Flip the order">Newest ↓</button></div></div>
+  <div class="grp"><div class="lbl">View</div><div class="nav"><button id="mg">Gallery</button><button id="mp">Posts</button></div></div>
+  <div id="s"></div>
+  <div class="keys">↑ ↓ move · Enter opens · Shift+Enter opens the link · Tab switches view · Esc clears</div>
+</aside>
+<div class="wrap">
+<div class="bar"><input id="q" placeholder="Search your saved posts…" autofocus autocomplete="off"></div>
+<main><div id="out"></div><div class="hint" id="hint"></div></main>
+</div>
+<script>
+const q = document.getElementById('q'), out = document.getElementById('out'), s = document.getElementById('s'), hint = document.getElementById('hint');
+const esc = (x) => String(x || '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const host = (u) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return u; } };
+const num = (n) => n == null ? '' : n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'K' : String(n);
+const day = (d) => { const t = new Date(d); return isNaN(t) ? '' : t.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }); };
+let items = [], sel = 0, tm, seq = 0;
+let mode = 'gallery';
+try { mode = localStorage.getItem('bm-mode') || 'gallery'; } catch {}
+function setMode(m) { mode = m; document.body.classList.toggle('posts', m === 'posts'); try { localStorage.setItem('bm-mode', m); } catch {} document.getElementById('mg').classList.toggle('on', m === 'gallery'); document.getElementById('mp').classList.toggle('on', m === 'posts'); render(); }
+document.getElementById('mg').onclick = () => { setMode('gallery'); q.focus(); };
+document.getElementById('mp').onclick = () => { setMode('posts'); q.focus(); };
+q.oninput = () => { clearTimeout(tm); tm = setTimeout(go, 200); };
+// which saved posts: bookmarks, likes, or both
+let kind = 'all';
+try { kind = localStorage.getItem('bm-kind') || 'all'; } catch {}
+const kindBtns = [...document.querySelectorAll('#kinds button')];
+function showKind() { kindBtns.forEach((b) => b.classList.toggle('on', b.dataset.k === kind)); }
+kindBtns.forEach((b) => b.onclick = () => { kind = b.dataset.k; try { localStorage.setItem('bm-kind', kind); } catch {} showKind(); go(); q.focus(); });
+showKind();
+const ic = (id) => `<svg class="ic"><use href="#i-${id}"/></svg>`;
+const kindMark = (b) => (b.kinds || []).map((k) => ic(k === 'like' ? 'like' : 'bm')).join(' ');
+// Two orders, kept apart. Browsing (nothing typed): newest or oldest saved. Searching: best match
+// by default; newest/oldest re-sort the matches by post date.
+let order = 'newest', searchOrder = 'best';
+try { order = localStorage.getItem('bm-order') === 'oldest' ? 'oldest' : 'newest'; } catch {}
+const ordBtn = document.getElementById('ord');
+const ORD = { best: 'Best match', newest: 'Newest ↓', oldest: 'Oldest ↑' };
+function showOrder() { ordBtn.textContent = ORD[q.value.trim() ? searchOrder : order]; }
+ordBtn.onclick = () => {
+  if (q.value.trim()) {
+    const all = ['best', 'newest', 'oldest'];
+    searchOrder = all[(all.indexOf(searchOrder) + 1) % all.length];
+  } else {
+    order = order === 'oldest' ? 'newest' : 'oldest';
+    try { localStorage.setItem('bm-order', order); } catch {}
+  }
+  showOrder(); go(); q.focus();
+};
+function sortHits(list) {
+  const order = searchOrder;
+  if (order === 'best') return list;
+  const k = (b) => b.created_at || '';
+  return [...list].sort((a, b) => order === 'oldest' ? k(a).localeCompare(k(b)) : k(b).localeCompare(k(a)));
+}
+
+// nothing typed: newest bookmarks first, more as you scroll
+let recentTotal = 0, loadingMore = false;
+async function recent(more) {
+  const my = more ? seq : ++seq;
+  if (more && (loadingMore || items.length >= recentTotal)) return;
+  loadingMore = true;
+  const r = await fetch(`api/saved/recent?n=40&kind=${kind}&order=${order === 'oldest' ? 'oldest' : 'newest'}&offset=${more ? items.length : 0}`).then((x) => x.json()).catch((e) => ({ error: e.message }));
+  loadingMore = false;
+  if (my !== seq || q.value.trim()) return;
+  if (r.error) { s.textContent = r.error; return; }
+  recentTotal = r.total;
+  if (more) { items = items.concat(r.results); out.insertAdjacentHTML('beforeend', r.results.map((b, i) => post(b, items.length - r.results.length + i)).join('')); }
+  else { items = r.results; sel = 0; render(); }
+  s.textContent = `${recentTotal} ${kind === 'like' ? 'likes' : kind === 'bookmark' ? 'bookmarks' : 'saved posts'}, ${order === 'oldest' ? 'oldest' : 'newest'} first`;
+}
+addEventListener('scroll', () => { if (!q.value.trim() && innerHeight + scrollY > document.body.scrollHeight - 1200) recent(true); });
+
+async function go() {
+  const v = q.value.trim(), my = ++seq;
+  history.replaceState(null, '', v ? '?q=' + encodeURIComponent(v) : location.pathname);
+  hint.style.display = 'none';
+  showOrder();
+  if (!v) return recent(false);
+  s.textContent = 'searching…';
+  const r = await fetch(`api/saved/search?n=24&kind=${kind}&q=` + encodeURIComponent(v)).then((x) => x.json()).catch((e) => ({ error: e.message }));
+  if (my !== seq) return;
+  if (r.error) { s.textContent = r.error; return; }
+  items = sortHits(r.results); sel = 0;
+  s.textContent = items.length + ' closest matches';
+  render();
+}
+
+// post text with t.co links swapped for where they go; media links dropped (the media is shown)
+function body(t, urls) {
+  let x = esc(t);
+  for (const u of urls || []) if (u.short) x = x.split(esc(u.short)).join(`<a href="${esc(u.url)}" target="_blank">${esc(u.display || host(u.url))}</a>`);
+  return x.replace(/\s*https:\/\/t\.co\/\w+\s*$/g, '').replace(/https:\/\/t\.co\/\w+/g, (m) => `<a href="${m}" target="_blank">${m}</a>`);
+}
+function media(list) {
+  if (!list || !list.length) return '';
+  const m = list.slice(0, 4);
+  if (m.length === 1) return `<div class="md n1"><div class="im"><img src="${esc(m[0].url)}" loading="lazy" alt=""${m[0].w && m[0].h ? ` style="aspect-ratio:${m[0].w}/${m[0].h}"` : ""}>${m[0].type !== 'photo' ? '<span class="play">▶</span>' : ''}</div></div>`;
+  return `<div class="md n${m.length}">` + m.map((x) => `<div class="im" style="background-image:url('${esc(x.url)}')">${x.type !== 'photo' ? '<span class="play">▶</span>' : ''}</div>`).join('') + '</div>';
+}
+function card(c) {
+  if (!c || !(c.title || c.image)) return '';
+  return `<a class="cd" href="${esc(c.url)}" target="_blank">${c.image ? `<img src="${esc(c.image)}" loading="lazy" alt="">` : ''}<div><div class="m">${esc(c.domain || host(c.url))}</div><div>${esc(c.title || '')}</div>${c.description ? `<div class="m">${esc(c.description.slice(0, 140))}</div>` : ''}</div></a>`;
+}
+function post(b, i) {
+  const qd = b.quoted;
+  const replies = (b.replies || []).filter((r) => (r.urls && r.urls.length) || r.card);
+  return `<div class="p" data-i="${i}"><img class="av" src="${esc((b.author_avatar || '').replace('_normal', '_bigger'))}" alt="" loading="lazy"><div class="pb">
+    <div class="ph"><b>${esc(b.author_name)}</b><span class="m">@${esc(b.author_handle)} · <a href="${esc(b.url)}" target="_blank">${day(b.created_at)}</a></span><span class="m" style="margin-left:auto">${kindMark(b)}</span></div>
+    <div class="tx">${body(b.text, b.urls || (b.links || []).map((u) => ({ url: u })))}</div>
+    ${media(b.media)}${card(b.card)}
+    ${qd ? `<div class="q"><div class="ph"><b>${esc(qd.name)}</b><span class="m">@${esc(qd.handle)} · ${day(qd.created_at)}</span></div><div class="tx">${body(qd.text, qd.urls)}</div>${media(qd.media)}${card(qd.card)}</div>` : ''}
+    ${replies.map((r) => `<div class="rp"><div class="m">Link in the author's reply</div><div class="tx">${body(r.text, r.urls)}</div>${card(r.card)}</div>`).join('')}
+    ${b.counts ? `<div class="ct"><span>${ic('reply')} ${num(b.counts.replies)}</span><span>${ic('rt')} ${num(b.counts.reposts)}</span><span>${ic('like')} ${num(b.counts.likes)}</span>${b.counts.views ? `<span>${ic('views')} ${num(b.counts.views)}</span>` : ''}<a href="${esc(b.url)}" target="_blank">open on X</a></div>` : `<div class="ct"><a href="${esc(b.url)}" target="_blank">open on X</a></div>`}
+  </div></div>`;
+}
+function render() {
+  out.className = mode === 'posts' ? 'feed' : 'masonry';
+  out.innerHTML = items.map(post).join('');
+  mark();
+}
+// both views flow down columns, so the arrows step one post at a time
+function cols() { return 1; }
+function mark() { [...out.children].forEach((c, i) => c.classList.toggle('on', i === sel)); const e = out.children[sel]; if (e) e.scrollIntoView({ block: 'nearest' }); }
+// in openone's spotlight window, Esc on an empty search closes it (a browser tab ignores this)
+addEventListener('focus', () => { q.focus(); q.select(); });
+q.onkeydown = (e) => {
+  if (e.key === 'Escape' && !q.value) { window.close(); return; }
+  if (e.key === 'Tab') { e.preventDefault(); setMode(mode === 'posts' ? 'gallery' : 'posts'); return; }
+  if (!items.length) return;
+  const k = { ArrowRight: 1, ArrowLeft: -1, ArrowDown: 1, ArrowUp: -1 }[e.key];
+  if (k) { e.preventDefault(); sel = Math.max(0, Math.min(items.length - 1, sel + k)); mark(); }
+  if (e.key === 'Enter') { e.preventDefault(); const b = items[sel]; window.open(e.shiftKey && b.links[0] ? b.links[0] : b.url, '_blank'); }
+  if (e.key === 'Escape') { q.value = ''; go(); }
+};
+out.addEventListener('click', (e) => { const p = e.target.closest('.p'); if (p && !e.target.closest('a')) window.open(items[p.dataset.i].url, '_blank'); });
+setMode(mode);
+const p = new URLSearchParams(location.search).get('q'); if (p) q.value = p; go();
+</script>
+</body></html>
