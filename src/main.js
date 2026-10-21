@@ -562,7 +562,7 @@ function openSaved() {
   if (savedWin && !savedWin.isDestroyed()) { savedWin.setBounds(bounds); savedWin.show(); savedWin.focus(); return; }
   savedWin = new BrowserWindow({
     ...bounds, frame: false, alwaysOnTop: true, skipTaskbar: true, show: false, resizable: true,
-    backgroundColor: nativeTheme.shouldUseDarkColors ? '#0c0a09' : '#f5f5f4', roundedCorners: true,
+    backgroundColor: '#0c0a09', roundedCorners: true, // the page is dark unless you switch it
     webPreferences: { contextIsolation: true, nodeIntegration: false },
   });
   savedWin.loadURL(url);
