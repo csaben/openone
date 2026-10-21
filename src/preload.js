@@ -22,6 +22,8 @@ contextBridge.exposeInMainWorld('oo', {
   startProject: (opts) => ipcRenderer.invoke('project:start', opts),
   code: (target) => ipcRenderer.invoke('project:code', target),
   saved: () => ipcRenderer.invoke('saved:open'),
+  learnShot: () => ipcRenderer.invoke('learn:shot'),
+  learn: (m) => ipcRenderer.invoke('learn:send', m),
   // push-to-talk settings (main.js "voice")
   voiceSet: (patch) => ipcRenderer.invoke('voice:set', patch),
   voiceCapture: () => ipcRenderer.invoke('voice:capture'),

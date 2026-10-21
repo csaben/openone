@@ -575,6 +575,47 @@ function openSaved() {
 
 ipcMain.handle('saved:open', () => openSaved());
 
+// ---------- learning: "p" in the panel ----------
+//
+// One long-lived coach agent in a folder of its own ("learn" in the config: { host, folder,
+// agent }; by default the first host, folder "plastic", claude). "p" takes a picture of the
+// screen under the mouse and asks what you're working on; what you type goes to the coach
+// with the picture. Its own CLAUDE.md says how to coach (out loud, on the board, by opening the
+// problem in your browser). Not running: it's started with --continue, so it remembers.
+
+const learnCfg = () => ({ host: Object.keys(hosts)[0], folder: 'plastic', agent: 'claude', ...(cfg.learn || {}) });
+const SHOTS = path.join(app.getPath('temp'), 'openone-learn');
+
+// the screen you were looking at, as a PNG the coach can read; the last 20 are kept
+async function learnShot() {
+  const d = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+  const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: Math.round(d.bounds.width * d.scaleFactor), height: Math.round(d.bounds.height * d.scaleFactor) } });
+  const src = sources.find((x) => x.display_id === String(d.id)) || sources[0];
+  if (!src) return null;
+  fs.mkdirSync(SHOTS, { recursive: true });
+  const file = path.join(SHOTS, `${Date.now()}.png`);
+  fs.writeFileSync(file, src.thumbnail.toPNG());
+  for (const old of fs.readdirSync(SHOTS).sort().slice(0, -20)) fs.rmSync(path.join(SHOTS, old), { force: true });
+  return file;
+}
+
+async function learn({ text, shot }) {
+  const L = learnCfg();
+  const h = hosts[L.host];
+  if (!h) throw new Error(`no host "${L.host}" for the coach`);
+  if (!String(text || '').trim()) return;
+  // a picture on this machine only helps a coach on this machine
+  const local = !/^ssh/.test(h.cfg.type || '');
+  const msg = `[learn, from the hotkey] ${String(text).trim()}${shot && local ? `\n(their screen when they asked: ${shot})` : ''}`;
+  const base = (p) => String(p || '').split(/[\\/]/).filter(Boolean).pop() || '';
+  const coach = monitor.view().find((p) => p.host === L.host && p.state !== 'shell' && base(p.path).toLowerCase() === L.folder.toLowerCase());
+  if (coach) { const r = lookup(coach.key); if (r) return actions.reply(r.h.src, r.p, msg); }
+  await projects.start(h, cfg, { folder: L.folder, agent: L.agent, resume: true, prompt: msg });
+}
+
+ipcMain.handle('learn:shot', () => learnShot().catch(() => null));
+ipcMain.handle('learn:send', (_e, m) => learn(m || {}));
+
 // ---------- drawing on the screen ----------
 //
 // The hotkey takes a screenshot of the screen under the mouse, then lays the board over

@@ -256,7 +256,7 @@ function agentsCard() {
   const n = inbox().length;
   const hint = query !== null
     ? `<kbd>↑</kbd><kbd>↓</kbd> pick · <kbd>Enter</kbd> ${OPEN_HINT} · <kbd>Esc</kbd> clear`
-    : `<kbd>j</kbd><kbd>k</kbd> pick · <kbd>Enter</kbd> open · <kbd>/</kbd> search · <kbd>n</kbd> project${window.oo.saved ? ' · <kbd>s</kbd> saved' : ''}${n ?` · <kbd>Tab</kbd> inbox` : ''}${HAS_SETTINGS ? ' · <kbd>l</kbd> settings' : ''}`;
+    : `<kbd>j</kbd><kbd>k</kbd> pick · <kbd>Enter</kbd> open · <kbd>/</kbd> search · <kbd>n</kbd> project${window.oo.learn ? ' · <kbd>p</kbd> learn' : ''}${window.oo.saved ? ' · <kbd>s</kbd> saved' : ''}${n ?` · <kbd>Tab</kbd> inbox` : ''}${HAS_SETTINGS ? ' · <kbd>l</kbd> settings' : ''}`;
   return { html, hint };
 }
 
@@ -414,6 +414,42 @@ function moveView(d) {
 // proj: { q, list, sel, pick, row, busy }
 // pick: { name, host, create, agent, resume, send, prompt }
 let proj = null;
+
+// ---------- learn ("p"): ask the coach, with a picture of the screen ----------
+let learn = null; // { text, shot: Promise<path|null>, busy }
+function openLearn() {
+  view = 'learn';
+  learn = { text: '', shot: window.oo.learnShot ? window.oo.learnShot() : Promise.resolve(null), busy: '' };
+  sig = '';
+  render();
+  const i = $('#ln');
+  if (i) i.focus();
+}
+function closeLearn() { learn = null; view = 'agents'; sig = ''; if (document.activeElement) document.activeElement.blur(); render(); selectTop(); }
+function learnCard() {
+  const html = `<div class="head"><h1>Learn</h1><button class="x" data-close>${X}</button></div>
+    <div class="empty" style="text-align:left">What do you want to work on, or what are you stuck on? Your coach sees the screen you were just on.</div>
+    <div class="reply"><input id="ln" placeholder="e.g. a few reddit-style mediums, or: why is this O(n²)?" spellcheck="false" autocomplete="off" value="${esc(learn.text)}"><button data-learn title="Send">${SEND}</button></div>
+    ${learn.busy ? `<div class="empty">${esc(learn.busy)}</div>` : ''}`;
+  return { html, hint: '<kbd>Enter</kbd> send to your coach · <kbd>Esc</kbd> back' };
+}
+async function sendLearn() {
+  const i = $('#ln');
+  const text = (i ? i.value : learn.text).trim();
+  if (!text || learn.busy) return;
+  learn.text = text; learn.busy = 'Sending…'; sig = ''; render();
+  try {
+    await window.oo.learn({ text, shot: await learn.shot });
+    toast('Sent to your coach');
+    learn = null; view = 'agents'; sig = '';
+    collapse();
+  } catch (err) { learn.busy = err.message; sig = ''; render(); }
+}
+function learnKey(e) {
+  if (e.key === 'Enter') { e.preventDefault(); sendLearn(); }
+  else if (e.key === 'Escape') { e.preventDefault(); closeLearn(); }
+}
+document.addEventListener('input', (e) => { if (e.target.id === 'ln' && learn) learn.text = e.target.value; });
 let projCache = null;
 const AGENT_KINDS = ['claude', 'codex'];
 const base = (s) => String(s || '').replace(/[\\/]+$/, '').split(/[\\/]/).pop().toLowerCase();
@@ -708,12 +744,13 @@ function render() {
   const showInbox = view === 'inbox' && items.length;
   const projecting = view === 'project' && proj;
   const setting = view === 'settings' && HAS_SETTINGS;
-  const { html, hint } = projecting ? projectCard() : setting ? settingsCard() : showInbox ? inboxCard(items) : agentsCard();
-  const next = `${projecting ? 'p' : setting ? 's' : showInbox ? 'i' : 'a'}|${html}|${hint}`;
+  const learning = view === 'learn' && learn;
+  const { html, hint } = learning ? learnCard() : projecting ? projectCard() : setting ? settingsCard() : showInbox ? inboxCard(items) : agentsCard();
+  const next = `${learning ? 'l' : projecting ? 'p' : setting ? 's' : showInbox ? 'i' : 'a'}|${html}|${hint}`;
   if (next !== sig) {
     // keep the reply or search box focused, caret and all, across the rebuild
     const a = document.activeElement;
-    const focused = a && ['reply', 'q', 'pq', 'pn', 'stt'].includes(a.id) ? a.id : null;
+    const focused = a && ['reply', 'q', 'pq', 'pn', 'stt', 'ln'].includes(a.id) ? a.id : null;
     const caret = focused ? a.selectionStart : 0;
     const top = body.scrollTop;
     body.innerHTML = html;
@@ -886,7 +923,7 @@ $('#b-term').addEventListener('click', () => {
 });
 
 body.addEventListener('click', (e) => {
-  const t = e.target.closest('[data-setting],[data-target],[data-close],[data-jump],[data-n],[data-send],[data-cur],[data-proj],[data-row],[data-start],[data-code],[data-ask],[data-sleep],[data-wake],[data-forget],[data-pick],[data-tidy],[data-tidy-go],[data-tidy-x]');
+  const t = e.target.closest('[data-setting],[data-target],[data-close],[data-jump],[data-n],[data-send],[data-cur],[data-proj],[data-row],[data-start],[data-code],[data-ask],[data-sleep],[data-wake],[data-forget],[data-pick],[data-tidy],[data-tidy-go],[data-tidy-x],[data-learn]');
   if (!t) return;
   if (t.dataset.setting) { sk = settingRows().findIndex((r) => r.id === t.dataset.setting); if (!stEdit || t.dataset.setting !== 'stt') changeSetting(t.dataset.setting); return; }
   if (t.dataset.target) { chooseTarget(t.dataset.target); return; }
@@ -910,6 +947,7 @@ body.addEventListener('click', (e) => {
   else if (t.dataset.jump) jump(t.dataset.jump);
   else if (t.dataset.n) answer(cur, Number(t.dataset.n));
   else if (t.dataset.send !== undefined) sendReply();
+  else if (t.dataset.learn !== undefined) sendLearn();
   else if (t.dataset.cur) { cur = t.dataset.cur; render(); }
 });
 body.addEventListener('input', (e) => {
@@ -954,6 +992,7 @@ document.addEventListener('keydown', (e) => {
   if (WEB && document.querySelector('#sheet.show')) return;
   const typing = e.target.tagName === 'INPUT';
   if (e.target.id === 'q') return searchKey(e);
+  if (e.target.id === 'ln') return learnKey(e);
   if (view === 'project' && proj) return projectKey(e);
   // listening for a new push-to-talk key: the keys are for that, not for the panel
   if ((S.voice || {}).capturing) { e.preventDefault(); return; }
@@ -977,6 +1016,7 @@ document.addEventListener('keydown', (e) => {
     else if (kb >= 0) { const row = body.querySelectorAll('.row')[kb]; if (row) jump(row.dataset.jump); }
   } else if (e.key === '/') { e.preventDefault(); openSearch(); }
   else if (e.key === 'n' && window.oo.projects) { e.preventDefault(); openProjects(); }
+  else if (e.key === 'p' && window.oo.learn) { e.preventDefault(); openLearn(); }
   else if (e.key === 's' && window.oo.saved) { e.preventDefault(); collapse(); window.oo.saved().catch((err) => toast(err.message)); }
   else if (e.key === 'o' && window.oo.code && view === 'agents' && kb >= 0) {
     const row = body.querySelectorAll('.row')[kb];
