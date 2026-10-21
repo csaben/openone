@@ -256,7 +256,7 @@ function agentsCard() {
   const n = inbox().length;
   const hint = query !== null
     ? `<kbd>↑</kbd><kbd>↓</kbd> pick · <kbd>Enter</kbd> ${OPEN_HINT} · <kbd>Esc</kbd> clear`
-    : `<kbd>j</kbd><kbd>k</kbd> pick · <kbd>Enter</kbd> open · <kbd>/</kbd> search · <kbd>n</kbd> project${n ? ` · <kbd>Tab</kbd> inbox` : ''}${HAS_SETTINGS ? ' · <kbd>l</kbd> settings' : ''}`;
+    : `<kbd>j</kbd><kbd>k</kbd> pick · <kbd>Enter</kbd> open · <kbd>/</kbd> search · <kbd>n</kbd> project${window.oo.saved ? ' · <kbd>s</kbd> saved' : ''}${n ?` · <kbd>Tab</kbd> inbox` : ''}${HAS_SETTINGS ? ' · <kbd>l</kbd> settings' : ''}`;
   return { html, hint };
 }
 
@@ -977,6 +977,7 @@ document.addEventListener('keydown', (e) => {
     else if (kb >= 0) { const row = body.querySelectorAll('.row')[kb]; if (row) jump(row.dataset.jump); }
   } else if (e.key === '/') { e.preventDefault(); openSearch(); }
   else if (e.key === 'n' && window.oo.projects) { e.preventDefault(); openProjects(); }
+  else if (e.key === 's' && window.oo.saved) { e.preventDefault(); collapse(); window.oo.saved().catch((err) => toast(err.message)); }
   else if (e.key === 'o' && window.oo.code && view === 'agents' && kb >= 0) {
     const row = body.querySelectorAll('.row')[kb];
     if (row) window.oo.code({ key: row.dataset.jump }).catch((err) => toast(err.message));

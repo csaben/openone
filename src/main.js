@@ -544,6 +544,36 @@ function openBoard(quiet = false) {
   boardWin.on('closed', () => { boardWin = null; });
 }
 
+// ---------- saved posts: a spotlight over the screen ----------
+//
+// "s" in the panel. "savedUrl" in the config is a search page for your saved posts (X
+// bookmarks and likes); it opens in a frameless window in the middle of the screen under
+// the mouse and goes away when it loses focus or the page closes itself (Esc on an empty
+// search). Links open in the browser.
+
+let savedWin = null;
+
+function openSaved() {
+  if (!cfg.savedUrl) { note('No saved-posts search set up', 'Set "savedUrl" in the openone config.'); return; }
+  const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
+  const w = Math.round(area.width * 0.78), h = Math.round(area.height * 0.82);
+  const bounds = { x: area.x + Math.round((area.width - w) / 2), y: area.y + Math.round((area.height - h) / 2), width: w, height: h };
+  if (savedWin && !savedWin.isDestroyed()) { savedWin.setBounds(bounds); savedWin.show(); savedWin.focus(); return; }
+  savedWin = new BrowserWindow({
+    ...bounds, frame: false, alwaysOnTop: true, skipTaskbar: true, show: false, resizable: true,
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#0c0a09' : '#f5f5f4', roundedCorners: true,
+    webPreferences: { contextIsolation: true, nodeIntegration: false },
+  });
+  savedWin.loadURL(cfg.savedUrl);
+  savedWin.once('ready-to-show', () => { savedWin.show(); savedWin.focus(); });
+  savedWin.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:/.test(url)) shell.openExternal(url); return { action: 'deny' }; });
+  // hidden, not closed, so the next "s" is instant and keeps the last search
+  savedWin.on('blur', () => { if (savedWin && !savedWin.webContents.isDevToolsOpened()) savedWin.hide(); });
+  savedWin.on('closed', () => { savedWin = null; });
+}
+
+ipcMain.handle('saved:open', () => openSaved());
+
 // ---------- drawing on the screen ----------
 //
 // The hotkey takes a screenshot of the screen under the mouse, then lays the board over
