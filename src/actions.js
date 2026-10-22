@@ -31,6 +31,32 @@ async function reply(src, p, text) {
   await src.text(p, text);
   await sleep(60);
   await src.keys(p, ['Enter']);
+  if (p.kind === 'claude') await confirmSent(src, p, text);
 }
 
-module.exports = { answer, reply, target };
+// Claude Code reads a long burst of typing as a paste and can swallow an Enter that lands
+// while it's still taking the paste in, leaving the message sitting in the input box. Look
+// at the box a moment later and press Enter again while the message is still there.
+async function confirmSent(src, p, text, tries = 2) {
+  for (let i = 0; i < tries; i++) {
+    await sleep(900);
+    let screen;
+    try { screen = await src.screen(p, 60); } catch { return; }
+    if (!stillTyped(screen, text)) return;
+    await src.keys(p, ['Enter']);
+  }
+}
+
+// The input box is the text between the last two horizontal rules on screen.
+function stillTyped(screen, text) {
+  const lines = String(screen || '').split('\n');
+  const rules = lines.map((l, i) => (/^\s*─{10,}\s*$/.test(l) ? i : -1)).filter((i) => i >= 0);
+  if (rules.length < 2) return false;
+  const box = lines.slice(rules[rules.length - 2] + 1, rules[rules.length - 1]).join('').replace(/\s+/g, '');
+  if (/\[Pastedtext/.test(box)) return true;
+  const flat = String(text).replace(/\s+/g, '');
+  const head = flat.slice(0, 24), tail = flat.slice(-24);
+  return Boolean(flat) && (box.includes(head) || box.includes(tail));
+}
+
+module.exports = { answer, reply, target, stillTyped };
