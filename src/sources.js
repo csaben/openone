@@ -585,7 +585,7 @@ class SshTmuxSource extends ShellSource {
   controlSpawn(session) { return spawn(this.ssh, this.sshArgs(`${this.pathPrefix}tmux -C attach -t ${sq(session)}`), { windowsHide: true }); }
 
   // one word per argument: Windows Terminal re-splits its command line and drops backslashes
-  attachArgv(session) { return [this.cfg.sshBin || 'ssh', '-t', this.cfg.ssh, ...(this.cfg.path ? ['export', `PATH=${this.cfg.path}:$PATH;`] : []), 'tmux', 'attach', ...(this.cfg.ownClient ? ['-f', OWN_CLIENT] : []), '-t', sq(session)]; }
+  attachArgv(session) { return [this.cfg.sshBin || 'ssh', '-t', this.cfg.ssh, ...(this.cfg.path ? ['env', `PATH=${this.cfg.path}:$PATH`] : []), 'tmux', 'attach', ...(this.cfg.ownClient ? ['-f', OWN_CLIENT] : []), '-t', sq(session)]; }
 
   // bash --norc doesn't have ~/.local/bin, where claude installs itself
   claudeCmd(args) { return `PATH="$HOME/.local/bin:$PATH" ${this.cfg.claude || 'claude'} ${args} </dev/null 2>/dev/null; echo`; }

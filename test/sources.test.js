@@ -73,6 +73,9 @@ test('a new terminal tab attaches to the session, over ssh for remote hosts', ()
   assert.deepStrictEqual(new LocalSource({ type: 'psmux' }).attachArgv('main'), ['psmux', 'attach', '-t', 'main']);
   const remote = new SshTmuxSource({ ssh: 'me@box', sshBin: 'ssh' });
   assert.deepStrictEqual(remote.attachArgv('work'), ['ssh', '-t', 'me@box', 'tmux', 'attach', '-t', "'work'"]);
+  // no ";": Windows Terminal would split the command line there into a second tab
+  const mac = new SshTmuxSource({ ssh: 'me@mac', sshBin: 'ssh', path: '/opt/homebrew/bin' });
+  assert.deepStrictEqual(mac.attachArgv('work'), ['ssh', '-t', 'me@mac', 'env', 'PATH=/opt/homebrew/bin:$PATH', 'tmux', 'attach', '-t', "'work'"]);
 });
 
 test('ownClient: a jump moves only the client this computer opened', async () => {
