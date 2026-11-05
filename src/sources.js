@@ -64,6 +64,10 @@ function hexChunks(s, size = 120) {
   return out;
 }
 
+// "ownClient": jumps only move the tmux clients this computer opened, marked with this harmless
+// attach flag, so a terminal attached from another computer stays where it is
+const OWN_CLIENT = 'no-detach-on-destroy';
+
 class TmuxSource {
   constructor(cfg) {
     this.cfg = cfg;
@@ -100,7 +104,7 @@ class TmuxSource {
   // session_attached counts control clients, so streamed sessions would all look attached.
   async realClients(maxAgeMs = 5000) {
     if (!this.clients || Date.now() - this.clients.at > maxAgeMs) {
-      const [out] = await this.batch([['list-clients', '-F', '#{client_name} #{session_name} #{client_control_mode} #{client_activity}']]);
+      const [out] = await this.batch([['list-clients', '-F', '#{client_name} #{session_name} #{client_control_mode} #{client_activity} #{client_flags}']]);
       this.clients = { at: Date.now(), list: parseClients(out).filter((c) => !c.control) };
     }
     return this.clients.list;
@@ -192,15 +196,16 @@ class TmuxSource {
   }
 
   // the tty of the terminal showing a session; only a local client's name is one
-  async clientTty(session) {
-    return ((await this.realClients(0)).find((c) => c.session === session) || {}).name || '';
+  async clientTty(session, ttys) {
+    return ((await this.realClients(0)).find((c) => c.session === session && (!ttys || ttys.has(c.name))) || {}).name || '';
   }
 
   // Points a terminal at the pane. Returns false when no terminal is attached to this host
-  // at all, so the caller can open one (attachArgv).
-  async focus(p) {
+  // at all, so the caller can open one (attachArgv). ttys limits it to the terminals on this
+  // computer, leaving alone a client attached from elsewhere.
+  async focus(p, ttys) {
     const cmds = [];
-    const clients = (await this.realClients(0).catch(() => [])).sort((a, b) => a.recent - b.recent);
+    const clients = (await this.realClients(0).catch(() => [])).filter((c) => (!this.cfg.ownClient || c.flags.includes(OWN_CLIENT)) && (!ttys || ttys.has(c.name))).sort((a, b) => a.recent - b.recent);
     if (clients.length && !clients.some((c) => c.session === p.session)) {
       // move the most recently used terminal (never a control client) onto this pane's session
       cmds.push(['switch-client', '-c', clients[0].name, '-t', p.session]);
@@ -580,7 +585,7 @@ class SshTmuxSource extends ShellSource {
   controlSpawn(session) { return spawn(this.ssh, this.sshArgs(`${this.pathPrefix}tmux -C attach -t ${sq(session)}`), { windowsHide: true }); }
 
   // one word per argument: Windows Terminal re-splits its command line and drops backslashes
-  attachArgv(session) { return [this.cfg.sshBin || 'ssh', '-t', this.cfg.ssh, ...(this.cfg.path ? ['export', `PATH=${this.cfg.path}:$PATH;`] : []), 'tmux', 'attach', '-t', sq(session)]; }
+  attachArgv(session) { return [this.cfg.sshBin || 'ssh', '-t', this.cfg.ssh, ...(this.cfg.path ? ['export', `PATH=${this.cfg.path}:$PATH;`] : []), 'tmux', 'attach', ...(this.cfg.ownClient ? ['-f', OWN_CLIENT] : []), '-t', sq(session)]; }
 
   // bash --norc doesn't have ~/.local/bin, where claude installs itself
   claudeCmd(args) { return `PATH="$HOME/.local/bin:$PATH" ${this.cfg.claude || 'claude'} ${args} </dev/null 2>/dev/null; echo`; }

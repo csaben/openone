@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { LocalSource, FMT } = require('../src/sources');
+const { LocalSource, FMT, createSource } = require('../src/sources');
 
 // A fake psmux: one pane whose cursor moves on every poll, like a working agent.
 function fake(type) {
@@ -73,4 +73,27 @@ test('a new terminal tab attaches to the session, over ssh for remote hosts', ()
   assert.deepStrictEqual(new LocalSource({ type: 'psmux' }).attachArgv('main'), ['psmux', 'attach', '-t', 'main']);
   const remote = new SshTmuxSource({ ssh: 'me@box', sshBin: 'ssh' });
   assert.deepStrictEqual(remote.attachArgv('work'), ['ssh', '-t', 'me@box', 'tmux', 'attach', '-t', "'work'"]);
+});
+
+test('ownClient: a jump moves only the client this computer opened', async () => {
+  const src = createSource({ type: 'ssh', ssh: 'x', ownClient: true });
+  assert.deepStrictEqual(src.attachArgv('main').slice(3), ['tmux', 'attach', '-f', 'no-detach-on-destroy', '-t', "'main'"]);
+  const sent = [];
+  src.batch = async (cmds) => { sent.push(...cmds); return cmds.map(() => ''); };
+  src.realClients = async () => [{ name: '/dev/pts/1', session: 'a', recent: 0, flags: 'attached,focused' }, { name: '/dev/pts/2', session: 'b', recent: 9, flags: 'attached,no-detach-on-destroy' }];
+  assert.equal(await src.focus({ session: 'c', windowIndex: '0', paneId: '%1' }), true);
+  assert.deepStrictEqual(sent[0], ['switch-client', '-c', '/dev/pts/2', '-t', 'c']);
+  src.realClients = async () => [{ name: '/dev/pts/1', session: 'a', recent: 0, flags: 'attached' }];
+  assert.equal(await src.focus({ session: 'a', windowIndex: '0', paneId: '%1' }), false);
+});
+
+test('focus: a client attached from elsewhere is left alone', async () => {
+  const src = createSource({ type: 'tmux', name: 't' });
+  const sent = [];
+  src.batch = async (cmds) => { sent.push(...cmds); return cmds.map(() => ''); };
+  src.realClients = async () => [{ name: '/dev/ttys001', session: 'b', recent: 0, flags: '' }, { name: '/dev/ttys004', session: 'a', recent: 5, flags: '' }];
+  assert.equal(await src.focus({ session: 'c', windowIndex: '0', paneId: '%1' }, new Set(['/dev/ttys004'])), true);
+  assert.deepStrictEqual(sent[0], ['switch-client', '-c', '/dev/ttys004', '-t', 'c']);
+  assert.equal(await src.focus({ session: 'c', windowIndex: '0', paneId: '%1' }, new Set()), false);
+  assert.equal(await src.clientTty('b', new Set(['/dev/ttys004'])), '');
 });

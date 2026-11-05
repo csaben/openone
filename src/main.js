@@ -178,8 +178,8 @@ function push() {
 }
 
 // the tty of the Mac terminal tab showing a local session, or ''
-async function paneTty(h, session) {
-  return MAC && h && h.cfg.type === 'tmux' ? h.src.clientTty(session).catch(() => '') : '';
+async function paneTty(h, session, ttys) {
+  return MAC && h && h.cfg.type === 'tmux' ? h.src.clientTty(session, ttys).catch(() => '') : '';
 }
 
 // Skip the toast for the pane you're already looking at.
@@ -189,7 +189,7 @@ async function isWatching(p) {
   const h = hosts[p.host];
   const tty = fg.tty && await paneTty(h, p.session);
   if (tty) return !!(fg.ok && fg.wt && fg.tty === tty);
-  return !!(fg.ok && fg.wt && fg.tab && h && new RegExp(tabPattern(h.cfg), 'i').test(fg.tab));
+  return !!(fg.ok && fg.wt && fg.tab && h && (fg.label === h.cfg.name || new RegExp(tabPattern(h.cfg), 'i').test(fg.tab)));
 }
 
 // A turn a service started (plastic's RAM page sending its listener an update) ends without
@@ -262,7 +262,7 @@ function startHosts() {
   hosts = {};
   monitor = new Monitor({ hostNames: [require('os').hostname(), ...cfg.hosts.map((h) => h.name)] });
   for (const hc of cfg.hosts) {
-    const h = { cfg: hc, src: createSource(hc), ok: false, error: 'connecting', running: true };
+    const h = { cfg: hc, src: createSource({ ownClient: MAC && hc.type === 'ssh', ...hc }), ok: false, error: 'connecting', running: true };
     hosts[hc.name] = h;
     pollHost(h);
   }
@@ -296,9 +296,10 @@ const tabPattern = (hc) => [hc.wtTab, `^${reEscape(hc.name)}$`].filter(Boolean).
 // attached to the host, or its tab can't be found, opens a new tab attached to the pane's
 // session instead, so nothing has to be opened and attached by hand first.
 async function showPane(h, pane) {
-  const attached = pane ? await h.src.focus(pane).catch(() => true) : true;
+  const ttys = MAC && h.cfg.type === 'tmux' ? await wt.ttys() : null;
+  const attached = pane ? await h.src.focus(pane, ttys).catch(() => true) : true;
   if (attached) {
-    const res = await wt.focus(tabPattern(h.cfg), h.cfg.wtTabIndex, pane ? await paneTty(h, pane.session) : '');
+    const res = await wt.focus(tabPattern(h.cfg), h.cfg.wtTabIndex, pane ? await paneTty(h, pane.session, ttys) : '', h.cfg.name);
     if (res.ok) return;
     if (!pane) {
       // the panel has already closed, so its own toast would go unseen
