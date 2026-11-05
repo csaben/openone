@@ -7,7 +7,7 @@
 
 # openone
 
-A small Windows edge dock that watches the coding agents (Claude Code, Codex) running in your tmux panes and tells you when one needs you.
+A small edge dock for Windows and macOS that watches the coding agents (Claude Code, Codex) running in your tmux panes and tells you when one needs you.
 
 It's inspired by [One](https://getone.one/#what-it-is). I loved the side-screen UI and having every agent in one place. But I didn't want a new terminal or a new way of working: I already run psmux in one Windows Terminal tab and ssh + tmux to a Linux box in another. openone just watches those panes and gets out of the way.
 
@@ -33,6 +33,23 @@ just install        # or: npm install; npm run dist; then run dist\openone-setup
 ```
 
 That builds a one-click, per-user installer, installs openone, launches it and makes it start at login. Other recipes: `just dev` (run from source), `just push-config`, `just uninstall`. Plain `npm install` + `.\start-openone.cmd` also runs it straight from the checkout.
+
+### macOS (Apple silicon)
+
+Needs [nvm](https://github.com/nvm-sh/nvm) or another way to get **Node 22** (`.nvmrc` pins it), [just](https://github.com/casey/just), and tmux (`brew install just tmux`). Use Node 22: on Node 26, Electron's installer unpacks one file, reports success and leaves no app.
+
+```bash
+nvm install && nvm use
+npm install
+npm start           # run from source, or:
+just install        # build an arm64 .app, copy it to /Applications and launch it
+```
+
+It lives in the menu bar and at the screen's edge, with no Dock icon. Jumping to an agent brings its Terminal.app tab forward (the only terminal supported so far), matched exactly through the tmux client's tty for local panes and by `wtTab` for ssh hosts. A host with no tab showing opens in a new Terminal window. Config lives in `~/Library/Application Support/openone` for an installed copy, and the local tmux is turned on automatically.
+
+macOS asks once for each of these: **Automation** (Terminal, to switch tabs), **Accessibility** (the push-to-talk key listener and pasting; restart openone after allowing it), **Microphone** (push-to-talk) and **Screen Recording** (draw on screen, sending your screen). Builds are ad-hoc signed, not notarized, so a copy built on another Mac needs right-click > Open the first time. Explorer's Send to and the desktop restart shortcut are Windows only.
+
+### First run
 
 On first run it writes `config.json` (to `%APPDATA%\openone` for an installed copy). psmux is turned on if it's installed, and every host in `~/.ssh/config` is added but turned off. Set `"enabled": true` on the ones you want, make each `wtTab` regex match that host's Windows Terminal tab title, then choose **Reload config** from the tray. See `config.example.json` for the shape.
 

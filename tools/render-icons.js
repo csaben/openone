@@ -15,6 +15,8 @@ const OUT = [
   { svg: 'spiky-cloud-black.svg', file: 'toast-black-256.png', size: 256 },
   // app/installer icon: needs its own dark tile so it reads on light Explorer too
   { svg: 'spiky-cloud-white-small.svg', file: 'app-256.png', size: 256, tile: '#141414' },
+  // macOS builds need at least 512
+  { svg: 'spiky-cloud-white-small.svg', file: 'app-512.png', size: 512, tile: '#141414' },
 ];
 
 app.whenReady().then(async () => {

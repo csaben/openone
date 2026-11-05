@@ -191,6 +191,11 @@ class TmuxSource {
     return all;
   }
 
+  // the tty of the terminal showing a session; only a local client's name is one
+  async clientTty(session) {
+    return ((await this.realClients(0)).find((c) => c.session === session) || {}).name || '';
+  }
+
   // Points a terminal at the pane. Returns false when no terminal is attached to this host
   // at all, so the caller can open one (attachArgv).
   async focus(p) {
@@ -556,6 +561,10 @@ class ShellSource extends TmuxSource {
 
 const sq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 
+// macOS hosts: BSD find has no -printf, so the same lines come from stat, with the folder
+// taken off the names
+const bsdStat = (dir, tests, format) => `(cd ${sq(dir)} && find . -mindepth 1 -maxdepth 1 ${tests} -exec stat -f '${format}' {} + | sed 's|\\./||') 2>/dev/null`;
+
 class SshTmuxSource extends ShellSource {
   // "path" puts folders in front of PATH: ssh logins on a Mac don't have Homebrew's tmux
   get pathPrefix() { return this.cfg.path ? `export PATH=${this.cfg.path}:"$PATH"; ` : ''; }
@@ -596,13 +605,13 @@ class SshTmuxSource extends ShellSource {
 
   async listDirs(dir) {
     const root = await this.resolve(dir);
-    const out = await this.exec([`find ${sq(root)} -mindepth 1 -maxdepth 1 -type d -not -name '.*' -printf '@@%T@ %f\\n' 2>/dev/null`]);
+    const out = await this.exec([`find ${sq(root)} -mindepth 1 -maxdepth 1 -type d -not -name '.*' -printf '@@%T@ %f\\n' 2>/dev/null || ${bsdStat(root, "-type d -not -name '.*'", '@@%m %N')}`]);
     return out.split('\n').map((l) => l.match(/^@@([\d.]+) (.+)$/)).filter(Boolean)
       .map((m) => ({ name: m[2], mtime: Number(m[1]) * 1000 })).sort((a, b) => b.mtime - a.mtime);
   }
 
   async ls(dir) {
-    const out = await this.exec([`find ${sq(dir)} -mindepth 1 -maxdepth 1 -printf '@@%y %s %f\\n' 2>/dev/null`]);
+    const out = await this.exec([`find ${sq(dir)} -mindepth 1 -maxdepth 1 -printf '@@%y %s %f\\n' 2>/dev/null || ${bsdStat(dir, '', '@@%.1Sp %z %N')}`]);
     return out.split('\n').map((l) => l.match(/^@@(\S) (\d+) (.+)$/)).filter(Boolean)
       .map((m) => ({ name: m[3], dir: m[1] === 'd', size: m[1] === 'd' ? 0 : Number(m[2]) }));
   }

@@ -1,5 +1,5 @@
 // First run: build a config.json from what this machine already has.
-// The local psmux host is enabled if psmux is installed; every concrete Host in
+// The local psmux (tmux on a Mac) host is enabled if it's installed; every concrete Host in
 // ~/.ssh/config is added disabled, so nothing is polled until you opt in.
 
 const fs = require('fs');
@@ -35,11 +35,12 @@ function parseSshConfig(text) {
 
 const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-function defaultConfig({ hostname, hasPsmux, sshHosts }) {
+function defaultConfig({ hostname, hasPsmux, hasTmux, sshHosts }) {
   const hosts = [];
   if (hasPsmux) {
     hosts.push({ name: hostname.toLowerCase(), type: 'psmux', pollMs: 1500, wtTab: 'PowerShell|pwsh|psmux|tmux', wtTabIndex: 0 });
   }
+  if (hasTmux) hosts.push({ name: hostname.toLowerCase().replace(/\.local$/, ''), type: 'tmux', pollMs: 1500, wtTab: 'tmux' });
   for (const h of sshHosts) {
     const tab = [escape(h.alias), h.user && `${escape(h.user)}@`].filter(Boolean).join('|');
     hosts.push({ name: h.alias, type: 'ssh', ssh: h.alias, pollMs: 1500, wtTab: tab, enabled: false });
@@ -54,11 +55,13 @@ function defaultConfig({ hostname, hasPsmux, sshHosts }) {
 }
 
 function detect() {
-  let hasPsmux = false;
-  try { execFileSync('where', ['psmux'], { stdio: 'ignore', windowsHide: true }); hasPsmux = true; } catch {}
+  const has = (finder, bin) => { try { execFileSync(finder, [bin], { stdio: 'ignore', windowsHide: true }); return true; } catch { return false; } };
+  const mac = process.platform === 'darwin';
+  const hasPsmux = !mac && has('where', 'psmux');
+  const hasTmux = mac && has('which', 'tmux');
   let sshHosts = [];
   try { sshHosts = parseSshConfig(fs.readFileSync(path.join(os.homedir(), '.ssh', 'config'), 'utf8')); } catch {}
-  return defaultConfig({ hostname: os.hostname(), hasPsmux, sshHosts });
+  return defaultConfig({ hostname: os.hostname(), hasPsmux, hasTmux, sshHosts });
 }
 
 module.exports = { parseSshConfig, defaultConfig, detect };

@@ -14,8 +14,9 @@ const SAME = { 3613: 29, 54: 42, 3640: 56, 3676: 3675 }; // CtrlRight, ShiftRigh
 const MODS = new Set([29, 42, 56, 3675]);
 const norm = (code) => SAME[code] || code;
 
+const MAC = process.platform === 'darwin';
 const NAMES = {
-  29: 'Ctrl', 42: 'Shift', 56: 'Alt', 3675: 'Win', 57: 'Space', 28: 'Enter', 15: 'Tab', 1: 'Esc', 14: 'Backspace',
+  29: 'Ctrl', 42: 'Shift', 56: MAC ? 'Option' : 'Alt', 3675: MAC ? 'Cmd' : 'Win', 57: 'Space', 28: 'Enter', 15: 'Tab', 1: 'Esc', 14: 'Backspace',
   3639: 'PrintScreen', 70: 'ScrollLock', 3653: 'Pause', 3666: 'Insert', 3667: 'Delete', 3655: 'Home', 3663: 'End',
   3657: 'PageUp', 3665: 'PageDown', 57416: 'Up', 57424: 'Down', 57419: 'Left', 57421: 'Right', 58: 'CapsLock',
   41: '`', 12: '-', 13: '=', 26: '[', 27: ']', 43: '\\', 39: ';', 40: "'", 51: ',', 52: '.', 53: '/',
@@ -91,7 +92,7 @@ class Capture {
     // a lone letter, digit or Space would fire every time you type it
     if (keys.length === 1 && /^([A-Z0-9]|Space|Enter|Tab|Backspace)$/.test(keyName(keys[0]))) {
       this.keys.clear();
-      return { error: `${keyName(keys[0])} alone would fire while you type; hold a modifier with it (Ctrl, Alt, Shift, Win)` };
+      return { error: `${keyName(keys[0])} alone would fire while you type; hold a modifier with it (${[29, 56, 42, 3675].map(keyName).join(', ')})` };
     }
     if (keys.every((k) => MODS.has(k)) && keys.length === 1) {
       this.keys.clear();
@@ -117,8 +118,22 @@ async function transcribe({ url, model, audio, mime = 'audio/webm', timeoutMs = 
 // (hookError says why) when it can't load
 let hook = null;
 let hookError = '';
+// macOS: without Accessibility the hook aborts the whole app, where try/catch can't see it.
+// So check first, and ask only once; it can be granted while openone runs, so look again.
+const NO_ACCESS = 'openone needs Accessibility: allow it in System Settings > Privacy & Security > Accessibility, then restart openone';
+let asked = false;
+function trusted() {
+  if (!MAC) return true;
+  const ok = require('electron').systemPreferences.isTrustedAccessibilityClient(!asked);
+  asked = true;
+  return ok;
+}
+
 function globalHook() {
-  if (hook || hookError) return hook;
+  if (hook) return hook;
+  if (!trusted()) { hookError = NO_ACCESS; return null; }
+  if (hookError && hookError !== NO_ACCESS) return null;
+  hookError = '';
   try {
     const { uIOhook, UiohookKey } = require('uiohook-napi');
     const fns = new Set();
@@ -130,7 +145,7 @@ function globalHook() {
       on: (fn) => fns.add(fn),
       off: (fn) => fns.delete(fn),
       paste: (enter) => {
-        uIOhook.keyTap(UiohookKey.V, [UiohookKey.Ctrl]);
+        uIOhook.keyTap(UiohookKey.V, [MAC ? UiohookKey.Meta : UiohookKey.Ctrl]);
         if (enter) setTimeout(() => uIOhook.keyTap(UiohookKey.Enter), 60);
       },
       stop: () => { try { uIOhook.stop(); } catch {} },

@@ -1,14 +1,14 @@
 // What's using the machines: memory and CPU per pane (everything a pane started, added
 // up through its process tree), and the biggest things running outside any pane.
 //
-// Each source runs one script on its host (PowerShell on Windows, sh on Linux) that prints
+// Each source runs one script on its host (PowerShell on Windows, sh on Linux and macOS) that prints
 //   @@MEM <total bytes> <available bytes>
 //   <pid>\t<ppid>\t<resident bytes>\t<cpu seconds so far>\t<name>\t<service or ''>\t<command line>
 //   @@GPU                      (Linux with nvidia-smi only)
 //   <pid>, <MiB>
 // Two samples a moment apart give CPU in use now.
 
-const SH = [
+const LINUX = [
   "awk '/^MemTotal:/{t=$2} /^MemAvailable:/{a=$2} END{print \"@@MEM\", t*1024, a*1024}' /proc/meminfo",
   // times = cpu seconds; comm can hold spaces, so the name comes from args. The group is the
   // systemd (user) service, so "python" processes read as the model server, the API, ...
@@ -18,6 +18,17 @@ const SH = [
   'command -v nvidia-smi >/dev/null 2>&1 && { echo @@GPU; nvidia-smi --query-compute-apps=pid,used_memory --format=csv,noheader,nounits 2>/dev/null; }',
   'echo @@END',
 ].join('; ');
+
+// macOS has no /proc or systemd. Reclaimable memory is what vm_stat calls free, inactive and
+// speculative; an app's name comes from its bundle, since its path can hold spaces.
+const MAC = [
+  "vm_stat | awk -v t=\"$(sysctl -n hw.memsize)\" '/page size of/{p=$8} /^Pages (free|inactive|speculative):/{gsub(/[.]/, \"\", $NF); a+=$NF} END{printf \"@@MEM %.0f %.0f\\n\", t, a*p}'",
+  "ps -axo pid=,ppid=,rss=,time=,command= | awk '{pid=$1; ppid=$2; rss=$3*1024; t=$4; $1=$2=$3=$4=\"\"; sub(/^ +/, \"\"); n=$1; " +
+    "if (match($0, /[^\\/]+[.]app\\//)) n=substr($0, RSTART, RLENGTH-5); else sub(/.*\\//, \"\", n); printf \"%s\\t%s\\t%.0f\\t%s\\t%s\\t\\t%s\\n\", pid, ppid, rss, t, n, substr($0, 1, 200)}'",
+  'echo @@END',
+].join('; ');
+
+const SH = `if [ "$(uname)" = Darwin ]; then ${MAC}; else ${LINUX}; fi`;
 
 const PS = [
   '$os = Get-CimInstance Win32_OperatingSystem',

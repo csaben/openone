@@ -55,10 +55,10 @@ function fromAncestors() {
       }
       return none;
     }
-    if (process.platform === 'win32') {
-      const out = sh('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+    if (process.platform === 'win32' || process.platform === 'darwin') {
+      const out = process.platform === 'darwin' ? sh('ps', ['-axo', 'pid=,ppid=']) : sh('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
         'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId) $($_.ParentProcessId)" }']);
-      for (const l of out.split(/\r?\n/)) { const [a, b] = l.trim().split(' ').map(Number); if (a) parent.set(a, b); }
+      for (const l of out.split(/\r?\n/)) { const [a, b] = l.trim().split(/\s+/).map(Number); if (a) parent.set(a, b); }
       for (let pid = process.pid, i = 0; pid && i < 30; i++) {
         if (panes.has(pid)) return panes.get(pid);
         pid = parent.get(pid);
@@ -75,6 +75,7 @@ function channelOn() {
   try {
     let cmd = '';
     if (process.platform === 'linux') cmd = fs.readFileSync(`/proc/${process.ppid}/cmdline`, 'utf8').replace(/\0/g, ' ');
+    else if (process.platform === 'darwin') cmd = sh('ps', ['-o', 'command=', '-p', String(process.ppid)]);
     else if (process.platform === 'win32') {
       cmd = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
         `(Get-CimInstance Win32_Process -Filter 'ProcessId=${process.ppid}').CommandLine`], { encoding: 'utf8', timeout: 8000, windowsHide: true });

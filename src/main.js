@@ -6,6 +6,7 @@ const path = require('path');
 const { Monitor } = require('./monitor');
 const { createSource } = require('./sources');
 const { WindowsTerminal } = require('./wt');
+const { MacTerminal } = require('./macterm');
 const actions = require('./actions');
 const projects = require('./projects');
 const { Embedder, semantic, projectText } = require('./embed');
@@ -13,13 +14,19 @@ const { detect: detectConfig } = require('./setup');
 const voice = require('./voice');
 const voicein = require('./voicein');
 
-// Installed builds keep config in %APPDATA%\openone; a source checkout uses ./config.json.
+const MAC = process.platform === 'darwin';
+// Apps started from Finder or at login get a bare PATH, without Homebrew's tmux or ~/.local/bin
+if (MAC) process.env.PATH = [...new Set([...(process.env.PATH || '').split(':').filter(Boolean), '/opt/homebrew/bin', '/usr/local/bin', path.join(require('os').homedir(), '.local', 'bin')])].join(':');
+
+// Installed builds keep config in %APPDATA%\openone (~/Library/Application Support/openone on
+// a Mac); a source checkout uses ./config.json.
 const CONFIG = app.isPackaged ? path.join(app.getPath('userData'), 'config.json') : path.join(__dirname, '..', 'config.json');
 // assets are unpacked from the asar so Windows (toasts) can read them as plain files
 const ASSETS = path.join(__dirname, '..', 'assets').replace('app.asar', 'app.asar.unpacked');
 // Taskbar and toasts follow the Windows "system" theme, not the app theme:
 // white cloud on a dark shell, black cloud on a light one.
 function lightShell() {
+  if (MAC) return !nativeTheme.shouldUseDarkColors;
   try {
     const out = execFileSync('reg', ['query', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize', '/v', 'SystemUsesLightTheme'],
       { encoding: 'utf8', windowsHide: true });
@@ -43,7 +50,7 @@ let muted = false;
 let pushTimer = null;
 let messages = []; // agent-to-agent messages, from the openone server ("server" in the config)
 let asks = []; // questions waiting on you, from the same server
-const wt = new WindowsTerminal();
+const wt = MAC ? new MacTerminal() : new WindowsTerminal();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 let firstRun = false;
@@ -109,17 +116,29 @@ function guard() {
   place();
 }
 
+// 'toolbar' is a Windows tool window, which never gets a taskbar button; macOS has no such type
+const TOOL = MAC ? {} : { type: 'toolbar' };
+// macOS: stay on every Space and over full-screen apps, as a topmost window does on Windows
+function everySpace(w) {
+  if (MAC) w.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
+}
+// with no Dock icon, showing a window doesn't bring the app forward by itself
+function comeForward() {
+  if (MAC) app.focus({ steal: true });
+}
+
 function createWindow() {
   win = new BrowserWindow({
     width: SIZES.tab[0], height: SIZES.tab[1], frame: false, transparent: true, resizable: false, movable: false,
     // 'toolbar' makes it a Windows tool window, which never gets a taskbar button.
     // skipTaskbar alone only removes the button once, and Windows brings it back
     // (blank icon, flashing whenever focus() is refused).
-    type: 'toolbar', skipTaskbar: true, alwaysOnTop: true, hasShadow: false, show: false, backgroundColor: '#00000000',
+    ...TOOL, skipTaskbar: true, alwaysOnTop: true, hasShadow: false, show: false, backgroundColor: '#00000000',
     icon: path.join(ASSETS, 'app-256.png'),
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, backgroundThrottling: false },
   });
   win.setAlwaysOnTop(true, 'screen-saver');
+  everySpace(win);
   win.setIgnoreMouseEvents(true, { forward: true });
   place();
   win.loadFile(path.join(__dirname, 'ui', 'index.html'));
@@ -158,11 +177,18 @@ function push() {
   }, 30);
 }
 
+// the tty of the Mac terminal tab showing a local session, or ''
+async function paneTty(h, session) {
+  return MAC && h && h.cfg.type === 'tmux' ? h.src.clientTty(session).catch(() => '') : '';
+}
+
 // Skip the toast for the pane you're already looking at.
 async function isWatching(p) {
   if (!p.active) return false;
   const fg = await wt.request({ op: 'fg' }, 1500);
   const h = hosts[p.host];
+  const tty = fg.tty && await paneTty(h, p.session);
+  if (tty) return !!(fg.ok && fg.wt && fg.tty === tty);
   return !!(fg.ok && fg.wt && fg.tab && h && new RegExp(tabPattern(h.cfg), 'i').test(fg.tab));
 }
 
@@ -272,7 +298,7 @@ const tabPattern = (hc) => [hc.wtTab, `^${reEscape(hc.name)}$`].filter(Boolean).
 async function showPane(h, pane) {
   const attached = pane ? await h.src.focus(pane).catch(() => true) : true;
   if (attached) {
-    const res = await wt.focus(tabPattern(h.cfg), h.cfg.wtTabIndex);
+    const res = await wt.focus(tabPattern(h.cfg), h.cfg.wtTabIndex, pane ? await paneTty(h, pane.session) : '');
     if (res.ok) return;
     if (!pane) {
       // the panel has already closed, so its own toast would go unseen
@@ -287,6 +313,10 @@ async function showPane(h, pane) {
 // session, titled with the host's name and kept so, so tabPattern finds it next time.
 function openTab(h, session) {
   const argv = h.src.attachArgv && h.src.attachArgv(session);
+  if (argv && MAC) {
+    wt.open(argv, h.cfg.name).then((r) => { if (!r.ok) note(`Couldn't open Terminal for ${h.cfg.name}`, r.error); });
+    return;
+  }
   if (!argv || process.platform !== 'win32') { note(`No terminal is showing ${h.cfg.name}`, `Attach to session ${session} to see it.`); return; }
   const child = spawn('wt.exe', ['-w', '0', 'new-tab', '--title', h.cfg.name, '--suppressApplicationTitle', '--', ...argv],
     { detached: true, stdio: 'ignore' });
@@ -397,9 +427,12 @@ async function reply(key, text) {
 }
 
 function trayIcon() {
-  const img = nativeImage.createFromPath(path.join(ASSETS, `tray-${shade()}-16.png`));
-  const hi = nativeImage.createFromPath(path.join(ASSETS, `tray-${shade()}-32.png`));
+  // a template image: macOS colors it to suit the menu bar
+  const tone = MAC ? 'black' : shade();
+  const img = nativeImage.createFromPath(path.join(ASSETS, `tray-${tone}-16.png`));
+  const hi = nativeImage.createFromPath(path.join(ASSETS, `tray-${tone}-32.png`));
   img.addRepresentation({ scaleFactor: 2, width: 32, height: 32, buffer: hi.toPNG() });
+  if (MAC) img.setTemplateImage(true);
   return img;
 }
 
@@ -436,6 +469,7 @@ function loginItem() {
 
 function openSettings() {
   if (size !== 'full') { size = 'full'; place(); }
+  comeForward();
   win.show();
   win.focus();
   win.webContents.focus();
@@ -445,6 +479,7 @@ function openSettings() {
 function toggle() {
   if (size !== 'full') { size = 'full'; place(); }
   if (win.isFocused()) { win.webContents.send('collapse'); win.blur(); return; }
+  comeForward();
   win.show();
   win.focus();
   win.webContents.focus();
@@ -474,6 +509,12 @@ async function restartAll() {
       { timeout: 20000, windowsHide: true });
     } catch {}
   }
+  if (MAC && app.isPackaged) {
+    try {
+      const pids = execFileSync('pgrep', ['-x', path.basename(process.execPath)], { encoding: 'utf8', timeout: 5000 }).split('\n').map(Number);
+      for (const pid of pids) if (pid && pid !== process.pid) try { process.kill(pid, 'SIGKILL'); } catch {}
+    } catch {}
+  }
   await sleep(1500);
   const args = app.isPackaged ? [] : [path.join(__dirname, '..')];
   spawn(process.execPath, args, { detached: true, stdio: 'ignore' }).unref();
@@ -491,6 +532,7 @@ app.on('second-instance', (_e, argv) => sendFilesFromArgs(argv));
 app.whenReady().then(() => {
   if (RESTARTING) return;
   app.setAppUserModelId('com.csaben.openone');
+  if (MAC) app.dock.hide();
   loadConfig();
   createWindow();
   wt.start();
@@ -502,8 +544,12 @@ app.whenReady().then(() => {
   tray.setToolTip('openone');
   tray.on('click', toggle);
   nativeTheme.on('updated', () => tray.setImage(trayIcon()));
-  tray.setContextMenu(Menu.buildFromTemplate(menuTemplate()));
-  tray.on('right-click', () => tray.setContextMenu(Menu.buildFromTemplate(menuTemplate())));
+  // macOS opens a set context menu on every click, so "click" would never fire
+  if (MAC) tray.on('right-click', () => tray.popUpContextMenu(Menu.buildFromTemplate(menuTemplate())));
+  else {
+    tray.setContextMenu(Menu.buildFromTemplate(menuTemplate()));
+    tray.on('right-click', () => tray.setContextMenu(Menu.buildFromTemplate(menuTemplate())));
+  }
   if (cfg.hotkey) {
     let ok = false;
     try { ok = globalShortcut.register(cfg.hotkey, toggle); } catch {}
@@ -522,7 +568,7 @@ app.whenReady().then(() => {
 
   ipcMain.on('ui:size', (_e, s) => { if (SIZES[s] && s !== size) { size = s; place(); } });
   ipcMain.on('ui:ignore', (_e, ignore) => win.setIgnoreMouseEvents(!!ignore, { forward: true }));
-  ipcMain.on('ui:focus', () => { win.focus(); win.webContents.focus(); win.flashFrame(false); });
+  ipcMain.on('ui:focus', () => { comeForward(); win.focus(); win.webContents.focus(); win.flashFrame(false); });
   ipcMain.on('ui:menu', () => Menu.buildFromTemplate(menuTemplate()).popup({ window: win }));
   ipcMain.on('ui:ready', () => { lastState = ''; push(); });
   ipcMain.on('ui:mute', () => { muted = !muted; push(); });
@@ -609,7 +655,7 @@ function openBoard(quiet = false) {
   if (!cfg.server) return;
   if (boardWin && !boardWin.isDestroyed()) {
     if (boardWin.isMinimized()) boardWin.restore();
-    if (quiet) boardWin.showInactive(); else { boardWin.show(); boardWin.focus(); }
+    if (quiet) boardWin.showInactive(); else { comeForward(); boardWin.show(); boardWin.focus(); }
     return;
   }
   const area = display().workArea;
@@ -640,14 +686,14 @@ function openSaved() {
   const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
   const w = Math.round(area.width * 0.78), h = Math.round(area.height * 0.82);
   const bounds = { x: area.x + Math.round((area.width - w) / 2), y: area.y + Math.round((area.height - h) / 2), width: w, height: h };
-  if (savedWin && !savedWin.isDestroyed()) { savedWin.setBounds(bounds); savedWin.show(); savedWin.focus(); return; }
+  if (savedWin && !savedWin.isDestroyed()) { savedWin.setBounds(bounds); comeForward(); savedWin.show(); savedWin.focus(); return; }
   savedWin = new BrowserWindow({
     ...bounds, frame: false, alwaysOnTop: true, skipTaskbar: true, show: false, resizable: true,
     backgroundColor: '#0c0a09', roundedCorners: true, // the page is dark unless you switch it
     webPreferences: { contextIsolation: true, nodeIntegration: false, preload: path.join(__dirname, 'saved-preload.js') },
   });
   savedWin.loadURL(url);
-  savedWin.once('ready-to-show', () => { savedWin.show(); savedWin.focus(); });
+  savedWin.once('ready-to-show', () => { comeForward(); savedWin.show(); savedWin.focus(); });
   savedWin.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:/.test(url)) shell.openExternal(url); return { action: 'deny' }; });
   // hidden, not closed, so the next "s" is instant and keeps the last search
   savedWin.on('blur', () => { if (savedWin && !savedWin.webContents.isDevToolsOpened()) savedWin.hide(); });
@@ -705,7 +751,7 @@ function keepPlastic() {
 }
 
 async function openPlastic() {
-  if (plasticWin && !plasticWin.isDestroyed()) { plasticWin.show(); plasticWin.focus(); return; }
+  if (plasticWin && !plasticWin.isDestroyed()) { comeForward(); plasticWin.show(); plasticWin.focus(); return; }
   if (!(await ensurePlastic())) throw new Error(`plastic isn't running and couldn't be started (see plastic.log in ${app.getPath('userData')})`);
   const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
   const w = Math.round(area.width * 0.8), h = Math.round(area.height * 0.85);
@@ -716,7 +762,7 @@ async function openPlastic() {
   });
   const base = plasticUrl();
   plasticWin.loadURL(`${base}${plasticCfg().page || '/'}`);
-  plasticWin.once('ready-to-show', () => { plasticWin.show(); plasticWin.focus(); });
+  plasticWin.once('ready-to-show', () => { comeForward(); plasticWin.show(); plasticWin.focus(); });
   // plastic's own pages (the lab, a recap video) open in another app window; the web, in the browser
   plasticWin.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith(base)) return { action: 'allow', overrideBrowserWindowOptions: { autoHideMenuBar: true, icon: toastIcon() } };
@@ -962,14 +1008,14 @@ async function openOverlay(region = null) {
   region = { ...region, w: d.bounds.width, h: d.bounds.height };
   const win = new BrowserWindow({
     ...d.bounds, frame: false, transparent: true, backgroundColor: '#00000000', alwaysOnTop: true, skipTaskbar: true,
-    type: 'toolbar', resizable: false, movable: false, hasShadow: false, fullscreenable: false, show: false, webPreferences: boardPrefs(),
+    ...TOOL, resizable: false, movable: false, hasShadow: false, fullscreenable: false, show: false, webPreferences: boardPrefs(),
   });
   win.setAlwaysOnTop(true, 'screen-saver');
   win.setBounds(d.bounds);
   overlay = { win, mode: 'draw', shot, region };
   const q = new URLSearchParams({ overlay: '1', x: region.x, y: region.y, w: region.w, h: region.h, ...(region.hide ? { hide: region.hide } : {}) });
   win.loadURL(`${serverUrl()}/board?${q}`);
-  win.once('ready-to-show', () => { win.show(); win.focus(); });
+  win.once('ready-to-show', () => { comeForward(); win.show(); win.focus(); });
   win.on('closed', () => { if (overlay && overlay.win === win) overlay = null; });
 }
 
@@ -977,7 +1023,7 @@ function overlayMode(mode) {
   if (!overlay) return;
   overlay.mode = mode;
   overlay.win.setIgnoreMouseEvents(mode === 'through', { forward: true });
-  if (mode === 'draw') overlay.win.focus();
+  if (mode === 'draw') { comeForward(); overlay.win.focus(); }
   overlay.win.webContents.send('board:mode', mode);
 }
 
@@ -1177,11 +1223,12 @@ function pill(s) {
   if (!pillWin || pillWin.isDestroyed()) {
     pillWin = new BrowserWindow({
       width: W, height: H, frame: false, transparent: true, resizable: false, movable: false, focusable: false, skipTaskbar: true,
-      alwaysOnTop: true, show: false, hasShadow: false, type: 'toolbar',
+      alwaysOnTop: true, show: false, hasShadow: false, ...TOOL,
       webPreferences: { preload: path.join(__dirname, 'pill-preload.js'), backgroundThrottling: false },
     });
     pillWin.setIgnoreMouseEvents(true);
     pillWin.setAlwaysOnTop(true, 'screen-saver');
+    everySpace(pillWin);
     pillWin.loadFile(path.join(__dirname, 'ui', 'pill.html'));
   }
   const wa = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;

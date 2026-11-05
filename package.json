@@ -2,13 +2,14 @@
   "name": "openone",
   "version": "0.1.0",
   "private": true,
-  "description": "Windows edge-dock that watches your tmux/psmux agent panes and jumps to them in Windows Terminal",
+  "description": "Edge-dock for Windows and macOS that watches your tmux/psmux agent panes and jumps to them in your terminal",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
     "test": "node --test test/*.test.js",
     "icons": "electron tools/render-icons.js",
-    "dist": "electron-builder --win nsis"
+    "dist": "electron-builder --win nsis",
+    "dist:mac": "electron-builder --mac --arm64"
   },
   "devDependencies": {
     "electron": "^38.2.0",
@@ -41,6 +42,17 @@
     "win": {
       "target": "nsis",
       "icon": "assets/app-256.png"
+    },
+    "mac": {
+      "target": "dmg",
+      "icon": "assets/app-512.png",
+      "category": "public.app-category.developer-tools",
+      "hardenedRuntime": false,
+      "extendInfo": {
+        "LSUIElement": true,
+        "NSMicrophoneUsageDescription": "openone records while you hold push-to-talk.",
+        "NSAppleEventsUsageDescription": "openone brings the right Terminal tab forward when you jump to an agent."
+      }
     },
     "nsis": {
       "oneClick": true,
