@@ -47,7 +47,7 @@ function defaultConfig({ hostname, hasPsmux, hasTmux, sshHosts }) {
   }
   return {
     hosts,
-    hotkey: 'Control+Alt+Space',
+    hotkey: process.platform === 'darwin' ? 'Shift+Command+Space' : 'Control+Alt+Space',
     notify: { input: true, done: true, toast: true, sound: true },
     showShells: false,
     display: 'primary',

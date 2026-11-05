@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { parseTabs, pick, commandLine } = require('../src/macterm');
+const { parseTabs, pick, commandLine, appsFor, inLoginShell } = require('../src/macterm');
 
 const row = (...v) => v.join('\u001f');
 const tabs = parseTabs([
@@ -12,29 +12,40 @@ const tabs = parseTabs([
 
 test('macterm: tabs parse, junk lines dropped', () => {
   assert.equal(tabs.length, 3);
-  assert.deepEqual(tabs[0], { window: 11, index: 1, selected: true, front: true, fg: true, tty: '/dev/ttys001', title: 'login -zsh  arelius — -zsh — 80×24' });
+  assert.deepEqual(tabs[0], { target: '11', index: 1, selected: true, front: true, fg: true, tty: '/dev/ttys001', title: 'login -zsh  arelius — -zsh — 80×24' });
   assert.deepEqual(parseTabs('@@OFF'), []);
 });
 
 test('macterm: a tab is found by its programs or title, then by position', () => {
   assert.equal(pick(tabs, 'tmux').index, 2);
-  assert.equal(pick(tabs, '^nope$|gpu-box').window, 22);
+  assert.equal(pick(tabs, '^nope$|gpu-box').target, '22');
   assert.equal(pick(tabs, 'nope', 1).index, 2);
   assert.equal(pick(tabs, 'nope'), undefined);
   assert.equal(pick(tabs, '(bad', 0).index, 1);
 });
 
 test('macterm: the tab already showing wins', () => {
-  assert.equal(pick(tabs, 'login').window, 11);
+  assert.equal(pick(tabs, 'login').target, '11');
   assert.equal(pick(tabs, 'login').index, 1);
 });
 
 test('macterm: a tty beats a title, and an unknown one falls back to it', () => {
   assert.equal(pick(tabs, 'gpu-box', undefined, '/dev/ttys002').index, 2);
-  assert.equal(pick(tabs, 'gpu-box', undefined, '/dev/ttys999').window, 22);
+  assert.equal(pick(tabs, 'gpu-box', undefined, '/dev/ttys999').target, '22');
 });
 
 test('macterm: command lines survive the shell', () => {
   assert.equal(commandLine(['tmux', 'attach', '-t', 'my work']), "tmux attach -t 'my work'");
   assert.equal(commandLine(['ssh', "'a b'"]), "ssh ''\\''a b'\\'''");
+});
+
+test('macterm: new tabs go to Ghostty when it is there, and panes are looked for in both', () => {
+  assert.deepEqual(appsFor(true).map((a) => a.name), ['Ghostty', 'Terminal']);
+  assert.deepEqual(appsFor(false).map((a) => a.name), ['Terminal']);
+});
+
+test('macterm: Ghostty ids stay text, and its commands get a login shell', () => {
+  const [t] = parseTabs(row('7F9C-BD3B', 1, 'true', 'true', 'true', '/dev/ttys004', 'tmux tmux'));
+  assert.equal(t.target, '7F9C-BD3B');
+  assert.match(inLoginShell("tmux attach -t 'a b'"), / -lc 'tmux attach -t '\\''a b'\\'''$/);
 });

@@ -45,9 +45,9 @@ npm start           # run from source, or:
 just install        # build an arm64 .app, copy it to /Applications and launch it
 ```
 
-It lives in the menu bar and at the screen's edge, with no Dock icon. Jumping to an agent brings its Terminal.app tab forward (the only terminal supported so far), matched exactly through the tmux client's tty for local panes and by `wtTab` for ssh hosts. A host with no tab showing opens in a new Terminal window. Config lives in `~/Library/Application Support/openone` for an installed copy, and the local tmux is turned on automatically.
+It lives in the menu bar and at the screen's edge, with no Dock icon, and **Shift+Cmd+Space** opens the panel. Jumping to an agent brings its tab forward in Ghostty or Terminal.app, matched exactly through the tmux client's tty for local panes and by `wtTab` for ssh hosts. A host with no tab showing opens in a new Ghostty tab, or a new Terminal window when Ghostty isn't installed. Config lives in `~/Library/Application Support/openone` for an installed copy, and the local tmux is turned on automatically.
 
-macOS asks once for each of these: **Automation** (Terminal, to switch tabs), **Accessibility** (the push-to-talk key listener and pasting; restart openone after allowing it), **Microphone** (push-to-talk) and **Screen Recording** (draw on screen, sending your screen). Builds are ad-hoc signed, not notarized, so a copy built on another Mac needs right-click > Open the first time. Explorer's Send to and the desktop restart shortcut are Windows only.
+macOS asks once for each of these: **Automation** (Ghostty and Terminal, to switch tabs), **Accessibility** (the push-to-talk key listener and pasting; restart openone after allowing it), **Microphone** (push-to-talk) and **Screen Recording** (draw on screen, sending your screen). Builds are ad-hoc signed, not notarized, so a copy built on another Mac needs right-click > Open the first time. Explorer's Send to and the desktop restart shortcut are Windows only.
 
 ### First run
 

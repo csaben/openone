@@ -314,7 +314,7 @@ async function showPane(h, pane) {
 function openTab(h, session) {
   const argv = h.src.attachArgv && h.src.attachArgv(session);
   if (argv && MAC) {
-    wt.open(argv, h.cfg.name).then((r) => { if (!r.ok) note(`Couldn't open Terminal for ${h.cfg.name}`, r.error); });
+    wt.open(argv, h.cfg.name).then((r) => { if (!r.ok) note(`Couldn't open a terminal for ${h.cfg.name}`, r.error); });
     return;
   }
   if (!argv || process.platform !== 'win32') { note(`No terminal is showing ${h.cfg.name}`, `Attach to session ${session} to see it.`); return; }
