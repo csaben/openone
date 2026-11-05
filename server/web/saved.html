@@ -25,6 +25,7 @@ body{display:grid;grid-template-columns:220px minmax(0,1fr);min-height:100vh}
 body.kbd .p.on{box-shadow:inset 0 0 0 2px var(--fg)}
 #modeline{position:fixed;right:16px;bottom:14px;z-index:5;font-size:12px;padding:6px 12px;border-radius:999px;background:var(--fg);color:var(--bg);display:none}
 body.kbd #modeline{display:block}
+#syncn{width:58px;font-size:14px;padding:2px 6px;margin-left:4px;border-radius:8px;box-shadow:none}
 .keys{margin-top:auto;font-size:11px;line-height:1.5;color:var(--mute);padding:0 10px}
 .wrap{min-width:0}
 main{max-width:1100px;margin:0 auto;padding:6px 20px 24px}
@@ -97,6 +98,7 @@ body.posts main,body.posts .bar{max-width:640px}
   <div class="grp"><div class="lbl">Order</div><div class="nav"><button id="ord" class="on" title="Flip the order">Newest ↓</button></div></div>
   <div class="grp"><div class="lbl">View</div><div class="nav"><button id="mg">Gallery</button><button id="mp">Posts</button></div></div>
   <div class="grp"><div class="lbl">Theme</div><div class="nav"><button id="theme" class="on">Dark</button></div></div>
+  <div class="grp" id="syncg" hidden><div class="lbl">From X</div><div class="nav"><button id="sync" title="Pull your newest bookmarks and likes from x.com">Sync newest</button></div><label class="lbl" style="text-transform:none">how many of each <input id="syncn" type="number" min="1" max="500" value="30"></label><div class="lbl" id="xcost" style="text-transform:none;line-height:1.5"></div></div>
   <div id="s"></div>
   <div class="keys">Esc: keyboard mode. h l sidebar ↔ posts · j k move · Enter opens · o opens the link · g G top/bottom · t theme · Tab view · / search · Ctrl+C close</div>
 </aside>
@@ -259,6 +261,39 @@ function setTheme(t) {
 }
 document.getElementById('theme').onclick = () => { setTheme(document.documentElement.dataset.theme === 'light' ? 'dark' : 'light'); back(); };
 setTheme(document.documentElement.dataset.theme === 'light' ? 'light' : 'dark');
+
+// Sync: only in openone's spotlight, which can reach x.com signed in as you (src/xsync.js).
+// Pulls the newest n bookmarks and the newest n likes; 30 is a screen or two of each.
+const syncBtn = document.getElementById('sync'), syncN = document.getElementById('syncn');
+if (window.ooSaved) document.getElementById('syncg').hidden = false;
+try { syncN.value = localStorage.getItem('bm-sync-n') || 30; } catch {}
+syncN.onkeydown = (e) => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); syncBtn.click(); } };
+syncN.onchange = () => { try { localStorage.setItem('bm-sync-n', syncN.value); } catch {} showCost(); };
+syncN.oninput = () => showCost();
+// what a sync costs (nothing: it reads x.com as you), what the same through the X API would,
+// and what's left of your X API credits
+let xc = null;
+function showCost() {
+  const el = document.getElementById('xcost');
+  if (!el) return;
+  const n = Math.max(1, Math.min(Number(syncN.value) || 30, 500));
+  const per = (xc && xc.usdPerPost) || 0.005;
+  const bal = xc && !xc.error ? `X API balance: ${Number(xc.total_balance).toFixed(2)}` : xc && xc.error ? `X API balance: ${xc.error}` : 'X API balance: …';
+  el.textContent = `Sync costs $0: it reads x.com as you. Through the API, ${n} + ${n} would be about ${(2 * n * per).toFixed(2)}. ${bal}`;
+}
+if (window.ooSaved && window.ooSaved.credits) { showCost(); window.ooSaved.credits().then((c) => { xc = c; showCost(); }).catch(() => {}); }
+syncBtn.onclick = async () => {
+  if (syncBtn.disabled) return;
+  const n = Math.max(1, Math.min(Number(syncN.value) || 30, 500));
+  syncBtn.disabled = true;
+  s.textContent = `syncing the newest ${n} bookmarks and likes from X…`;
+  const r = await window.ooSaved.sync(n).catch((e) => ({ error: e.message }));
+  syncBtn.disabled = false;
+  if (r.error) { s.textContent = `sync failed: ${r.error}`; return; }
+  const b = r.bookmark || {}, l = r.like || {};
+  await go();
+  s.textContent = `synced: ${b.added || 0} new bookmarks, ${l.added || 0} new likes (of ${b.seen || 0} + ${l.seen || 0} checked)`;
+};
 
 addEventListener('keydown', (e) => {
   if (!kbd) return;

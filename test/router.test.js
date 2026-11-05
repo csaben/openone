@@ -161,3 +161,33 @@ test('Router + jev down: falls back to sticky, then the chat model', async (t) =
 test('typedLine: the user\'s relayed words are typed as they are', () => {
   assert.equal(typedLine({ content: '[ring] check the build', from: 'voice', user: true }), '[ring] check the build');
 });
+
+test('Router: overheard (strict) needs jev sure or a cue; to fixes the agent; fallback never drops; quiet says nothing', async (t) => {
+  const sent = [];
+  const said = [];
+  const r = new Router({ cfg: { to: 'shop@desk', jev: { url: 'http://jev/v1', key: 'k', threshold: 0.35, sureAt: 0.75 } }, roster: () => AGENTS, send: (to, text) => sent.push([to, text]), confirm: (s) => said.push(s) });
+  let p = 0.6;
+  t.mock.method(globalThis, 'fetch', async () => ({ ok: true, json: async () => ({ answers: { for_agent: { type: 'noul', noul: p } } }) }));
+  assert.equal((await r.route({ text: 'pass me the chips', strict: true, quiet: true })).route, 'note');
+  assert.equal((await r.route({ text: 'And open one is the one you set it to', strict: true, quiet: true })).route, 'note');
+  p = 0.9;
+  assert.equal((await r.route({ text: 'deploy it', strict: true, to: 'api@box', source: 'voice', quiet: true })).to, 'api@box');
+  assert.deepEqual(sent.slice(-1), [['api@box', '[voice] deploy it']]);
+  // within the sticky window, overheard talk still doesn't follow the last note
+  t.mock.method(globalThis, 'fetch', async () => { throw new Error('down'); });
+  assert.equal((await r.route({ text: 'hmm', strict: true, quiet: true })).route, 'note');
+  // said on purpose: a note becomes a message to the fallback
+  const out = await r.route({ text: 'what a day', fallback: 'api@box', quiet: true });
+  assert.equal(out.route, 'agent');
+  assert.equal(out.to, 'api@box');
+  assert.deepEqual(said, []);
+});
+
+test('Router: direct goes straight to the named agent as the user\'s words, or nowhere', async (t) => {
+  const sent = [];
+  const r = new Router({ cfg: { to: 'shop@desk', jev: { url: 'http://jev/v1', key: 'k' } }, roster: () => AGENTS, send: (to, text) => sent.push([to, text]) });
+  t.mock.method(globalThis, 'fetch', async () => { throw new Error('should not ask jev'); });
+  assert.equal((await r.route({ text: 'a hash map', source: 'voice', to: 'api@box', direct: true, quiet: true })).to, 'api@box');
+  assert.deepEqual(sent, [['api@box', '[voice] a hash map']]);
+  assert.equal((await r.route({ text: 'x', to: 'gone@box', direct: true, quiet: true })).route, 'note');
+});

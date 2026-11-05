@@ -19,6 +19,7 @@ const { Asks, view: askView } = require('../src/asks');
 const { Sleepers, sleepAgent, wakeAgent } = require('../src/sleep');
 const { Suggester, runCodex, buildPrompt, msUntil } = require('../src/suggest');
 const { Drops } = require('../src/drops');
+const { Opens } = require('../src/opens');
 const { Board } = require('../src/board');
 const { Saved } = require('../src/saved');
 const resources = require('../src/resources');
@@ -40,6 +41,10 @@ const hosts = {};
 // agent-to-agent messages; typed into a pane through the same path as a reply
 const bus = new Bus({
   monitor,
+  // config hopsOffUntil (an ISO time): no hop limit until then; read each time, so no restart
+  hopsOff: () => {
+    try { const u = JSON.parse(fs.readFileSync(CONFIG, 'utf8')).hopsOffUntil; return !!u && Date.now() < Date.parse(u); } catch { return false; }
+  },
   deliver: async (p, text) => {
     const h = hosts[p.host];
     await actions.reply(h.src, p, text);
@@ -64,6 +69,8 @@ const asks = new Asks({
 });
 // agents put to sleep: exited, with what it takes to resume them
 const sleepers = new Sleepers({ file: cfg.sleepFile || path.join(require('os').homedir(), '.local', 'state', 'openone', 'sleeping.json') });
+// agents opening a project in VS Code on the desktop you're at (src/opens.js)
+const opens = new Opens();
 // links, text and files between the phone and the computers (src/drops.js)
 const drops = new Drops({ dir: path.join(require('os').homedir(), '.local', 'state', 'openone', 'drops'), onChange: () => pushState() });
 setInterval(() => drops.sweep(), 3600000);
@@ -334,10 +341,14 @@ async function api(req, res, parts) {
   }
   if (a === 'board') return boardApi(req, res, b, c);
   if (a === 'saved') return savedApi(req, res, b);
+  if (a === 'open') return openApi(req, res, b ? decodeURIComponent(b) : '');
   if (a === 'speak') return speakApi(req, res, b ? decodeURIComponent(b) : '', c);
   if (m === 'POST' && a === 'route' && !b) {
     const body = await readJson(req);
-    return send(res, 200, await router.route({ text: body.text, source: String(body.source || 'ring').replace(/[^\w-]/g, '') || 'ring', refile: body.refile }));
+    return send(res, 200, await router.route({
+      text: body.text, source: String(body.source || 'ring').replace(/[^\w-]/g, '') || 'ring', refile: body.refile,
+      strict: !!body.strict, to: String(body.to || ''), fallback: String(body.fallback || ''), quiet: !!body.quiet, direct: !!body.direct,
+    }));
   }
   if (m === 'POST' && a === 'route' && b === 'not-for-me') {
     const body = await readJson(req);
@@ -512,6 +523,30 @@ async function busApi(req, res, what) {
     const name = p ? names([...bus.agents().filter((x) => x.key !== key), { ...p, kind: p.kind || 'agent' }]).get(key) : key;
     return send(res, 201, { name, key, note: 'it may take a few seconds to show up in roster' });
   }
+  // open a project, or an agent's folder, in VS Code on the desktop you're at
+  if (m === 'POST' && what === 'code') {
+    let target;
+    if (body.agent) {
+      const p = bus.resolve(body.agent);
+      if (!p) return send(res, 404, { error: `no agent named "${body.agent}"; call roster to see who's running` });
+      if (!p.path) return send(res, 404, { error: `openone doesn't know ${body.agent}'s folder` });
+      target = { host: p.host, dir: p.path };
+    } else {
+      const h = hostOf(body.host);
+      const want = String(body.folder || '').trim().toLowerCase();
+      if (!want) return send(res, 400, { error: 'give agent, or host and folder' });
+      const dirs = await h.src.listDirs(projects.workspace(h.cfg));
+      const d = dirs.find((x) => x.name.toLowerCase() === want);
+      if (!d) return send(res, 404, { error: `no project "${body.folder}" on ${h.cfg.name}; call projects to see them` });
+      target = { host: h.cfg.name, folder: d.name };
+    }
+    try {
+      const it = await opens.result(opens.add({ target, from: myName }).id, 20000);
+      if (it.status === 'done') return send(res, 200, { ok: true, on: it.by, target });
+      if (it.status === 'failed') return send(res, 500, { error: `${it.by} couldn't open it: ${it.error}` });
+      return send(res, 504, { error: `the desktop app didn't report back (${it.status === 'queued' ? 'never picked it up' : `${it.by} took it`}); VS Code may still open` });
+    } catch (e) { return send(res, e.code || 500, { error: e.message }); }
+  }
   if (m === 'GET' && what === 'listen') {
     // a Claude session started with the openone channel: messages are pushed here
     if (!me) return send(res, 404, { error: 'not in a pane openone knows (yet)' });
@@ -596,6 +631,29 @@ async function boardApi(req, res, what, id) {
     return send(res, 200, { ok: true });
   }
   if (m === 'POST' && what === 'clear') { board.clear(); return send(res, 200, { version: board.version }); }
+  return send(res, 404, { error: 'not found' });
+}
+
+// ---------- open in VS Code ----------
+//
+//   GET   /api/open?for=<device>&idle=<ms>&wait=25   requests for the desktop you're at
+//   POST  /api/open/:id   { ok, error }              how it went
+
+async function openApi(req, res, id) {
+  const m = req.method;
+  if (!id && m === 'GET') {
+    const q = new URL(req.url, 'http://x').searchParams;
+    const by = String(q.get('for') || 'someone');
+    opens.seen(by, q.get('idle'));
+    let list = opens.take(by);
+    const wait = Math.min(Number(q.get('wait')) || 0, 55);
+    if (!list.length && wait) { await opens.wait(wait * 1000); list = opens.take(by); }
+    return send(res, 200, list);
+  }
+  if (id && m === 'POST') {
+    const body = await readJson(req);
+    return opens.done(id, { ok: !!body.ok, error: body.error }) ? send(res, 200, { ok: true }) : send(res, 404, { error: 'gone' });
+  }
   return send(res, 404, { error: 'not found' });
 }
 

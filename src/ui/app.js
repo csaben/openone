@@ -156,7 +156,7 @@ function inboxCard(items) {
   const hint = p.state === 'input' && n
     ? `Press ${n <= 3 ? (p.options.map((o) => `<kbd>${o.n}</kbd>`).join(n === 3 ? ', ' : ' or ').replace(/, (?=[^,]*$)/, ' or ')) : `<kbd>1</kbd> – <kbd>${n}</kbd>`} to answer`
     : `<kbd>Enter</kbd> ${OPEN_HINT}${items.length > 1 ? ' · <kbd>j</kbd><kbd>k</kbd> next' : ''}`;
-  return { html, hint: `${hint} · <kbd>r</kbd> reply · <kbd>Tab</kbd> list` };
+  return { html, hint: `${hint} · <kbd>r</kbd> reply · <kbd>d</kbd> dismiss · <kbd>Tab</kbd> list` };
 }
 
 const ASK = '<svg viewBox="0 0 16 16" style="color:var(--input, #e5a03a)"><path d="M6 6a2 2 0 1 1 2.8 1.8c-.5.3-.8.7-.8 1.2v.5"/><circle cx="8" cy="12" r=".6"/></svg>';
@@ -167,7 +167,7 @@ function askCard(a, items, pager) {
     <div class="q">${esc(a.title)}</div>${a.body ? `<div class="summary">${esc(a.body)}</div>` : ''}
     <div class="opts">${a.options.map((o, i) => `<button class="opt" data-ask="${esc(a.id)}" data-opt="${esc(o.id)}"><span class="n">${i + 1}</span><span class="l">${esc(o.label)}</span></button>`).join('')}</div>`;
   const n = a.options.length;
-  const hint = `Press ${n === 1 ? '<kbd>1</kbd>' : `<kbd>1</kbd> – <kbd>${n}</kbd>`} to answer${items.length > 1 ? ' · <kbd>j</kbd><kbd>k</kbd> next' : ''} · <kbd>Tab</kbd> list`;
+  const hint = `Press ${n === 1 ? '<kbd>1</kbd>' : `<kbd>1</kbd> – <kbd>${n}</kbd>`} to answer${items.length > 1 ? ' · <kbd>j</kbd><kbd>k</kbd> next' : ''} · <kbd>d</kbd> dismiss · <kbd>Tab</kbd> list`;
   return { html, hint };
 }
 
@@ -185,6 +185,23 @@ async function wake(id) {
   const r = (S.sleeping || []).find((x) => x.id === id);
   toast(`Waking ${r ? r.label : 'it'}…`);
   try { const key = await window.oo.wake(id); if (WEB && key) window.oo.jump(key); } catch (err) { toast(err.message); }
+}
+
+// d: take the current inbox item off without acting on it. A question is withdrawn (the agent
+// isn't told), a finished agent is marked seen.
+function dismissCur() {
+  const q = curAsk();
+  if (q) {
+    S.asks = (S.asks || []).filter((a) => a.id !== q.id);
+    window.oo.dismissAsk(q.id).catch((err) => toast(err.message));
+  } else {
+    const p = find(cur);
+    if (!p || !p.unseen) return;
+    p.unseen = false;
+    window.oo.seen(p.key);
+  }
+  sig = '';
+  render();
 }
 
 function answerAsk(id, opt) {
@@ -256,7 +273,7 @@ function agentsCard() {
   const n = inbox().length;
   const hint = query !== null
     ? `<kbd>↑</kbd><kbd>↓</kbd> pick · <kbd>Enter</kbd> ${OPEN_HINT} · <kbd>Esc</kbd> clear`
-    : `<kbd>j</kbd><kbd>k</kbd> pick · <kbd>Enter</kbd> open · <kbd>/</kbd> search · <kbd>n</kbd> project${window.oo.learn ? ' · <kbd>p</kbd> learn' : ''}${window.oo.saved ? ' · <kbd>s</kbd> saved' : ''}${n ?` · <kbd>Tab</kbd> inbox` : ''}${HAS_SETTINGS ? ' · <kbd>l</kbd> settings' : ''}`;
+    : `<kbd>j</kbd><kbd>k</kbd> pick · <kbd>gg</kbd><kbd>G</kbd> top/bottom · <kbd>⇧Tab</kbd> next machine · <kbd>Enter</kbd> open · <kbd>/</kbd> search · <kbd>n</kbd> project${window.oo.learn ? ' · <kbd>p</kbd> learn' : ''}${window.oo.shotSend ? ' · <kbd>v</kbd> send your screen' : ''}${window.oo.saved ? ' · <kbd>s</kbd> saved' : ''}${window.oo.plastic ? ' · <kbd>m</kbd> plastic' : ''}${n ?` · <kbd>Tab</kbd> inbox` : ''}${HAS_SETTINGS ? ' · <kbd>l</kbd> settings' : ''}`;
   return { html, hint };
 }
 
@@ -284,15 +301,28 @@ function settingRows() {
   if (v.focused) rows.push({ id: 'enter', name: 'Press Enter after pasting', value: on(v.enter), sub: 'Sends it in chat apps' });
   rows.push({ id: 'speed', name: 'Voice speed', value: `${v.speed || 1.75}x`, sub: 'How fast agents talk back · Enter goes faster, Backspace slower' });
   rows.push({ id: 'beep', name: 'Beep when listening', value: on(v.beep), sub: 'A short tone when the mic opens and closes' });
+  if (v.clips) {
+    rows.push({ id: 'clipRoute', name: 'Controller voice', value: v.clipRoute === 'auto' ? 'The router picks the agent' : 'One chat', sub: 'What you say through player-one · "take me to fastudio" jumps there' });
+    if (v.clipRoute !== 'auto') rows.push({ id: 'clipTarget', name: 'Controller voice goes to', value: v.clipTargetLabel, sub: 'Overheard talk (always listening) only goes when it\'s clearly for an agent' });
+  }
+  if (S.shot) {
+    rows.push({ id: 'shotTarget', name: 'Your screen goes to', value: S.shot.targetLabel, sub: '"v" sends a picture of your screen, for a second pair of eyes' });
+    rows.push({ id: 'shotAsk', name: 'When you press "v"', value: S.shot.ask ? 'Ask where to send it' : 'Send it at once', sub: S.shot.ask ? 'A list of agents opens, that one picked first' : 'No question: straight to that agent' });
+    rows.push({ id: 'shotPlastic', name: 'Keep it in plastic', value: S.shot.plastic ? 'Yes, during a session' : 'No', sub: S.shot.plastic ? 'During a plastic session it goes into the RAM too, whoever you sent it to' : 'It only goes to the agent you send it to' });
+  }
   rows.push({ id: 'stt', name: 'Speech-to-text server', value: v.stt ? v.stt.replace(/^https?:\/\//, '').replace(/\/v1\/audio\/transcriptions$/, '') : 'Not set', sub: 'An OpenAI-style /v1/audio/transcriptions URL' });
   return rows;
 }
 
-function targetChoices() {
+function targetChoices(what = (stPick && stPick.what) || 'voice') {
   const agents = S.panes.filter((p) => p.kind).sort((a, b) => a.host.localeCompare(b.host) || a.label.localeCompare(b.label));
-  return [{ key: 'focused', label: 'The focused window', sub: 'Paste where your cursor is' },
-    ...agents.map((p) => ({ key: p.key, label: p.label, sub: `${p.kind} · ${p.host}`, p }))];
+  const recent = { key: 'recent', label: 'The agent you used last', sub: 'The one you last messaged, answered or opened' };
+  const first = what === 'shot' ? [recent]
+    : what === 'clip' ? [{ key: '', label: 'Same as push to talk', sub: 'Wherever push to talk sends, or the agent you used last' }, recent]
+      : [{ key: 'focused', label: 'The focused window', sub: 'Paste where your cursor is' }];
+  return [...first, ...agents.map((p) => ({ key: p.key, label: p.label, sub: `${p.kind} · ${p.host}`, p }))];
 }
+const pickedTarget = () => (stPick && stPick.what === 'shot' ? (S.shot || {}).target : stPick && stPick.what === 'clip' ? V().clipTarget : V().target);
 
 function settingsCard() {
   const v = V();
@@ -300,12 +330,13 @@ function settingsCard() {
   if (stPick) {
     const list = targetChoices();
     stPick.sel = Math.min(stPick.sel, list.length - 1);
-    const rows = list.map((c, i) => `<div class="row ${i === stPick.sel ? 'kb' : ''} ${c.key === v.target ? 'cur' : ''}" data-target="${esc(c.key)}">
+    const now = pickedTarget();
+    const rows = list.map((c, i) => `<div class="row ${i === stPick.sel ? 'kb' : ''} ${c.key === now ? 'cur' : ''}" data-target="${esc(c.key)}">
       <span class="st ${c.p ? status(c.p) : 'idle'}"></span>
       <div class="mid"><div class="t1"><span class="nm">${esc(c.label)}</span></div><div class="t2">${esc(c.sub)}</div></div>
-      ${c.key === v.target ? '<span class="age">current</span>' : ''}</div>`).join('');
+      ${c.key === now ? '<span class="age">current</span>' : ''}</div>`).join('');
     return {
-      html: `<div class="head"><h1>Send what you say to</h1><button class="x" data-close>${X}</button></div>${rows}`,
+      html: `<div class="head"><h1>${stPick.what === 'shot' ? 'Send your screen to' : stPick.what === 'clip' ? 'Send controller voice to' : 'Send what you say to'}</h1><button class="x" data-close>${X}</button></div>${rows}`,
       hint: '<kbd>j</kbd><kbd>k</kbd> pick · <kbd>Enter</kbd> choose · <kbd>Esc</kbd> back',
     };
   }
@@ -333,7 +364,12 @@ function changeSetting(id) {
   if (id === 'enabled') { if (!v.hasKey && !v.enabled) window.oo.voiceCapture().catch((err) => toast(err.message)); else set({ enabled: !v.enabled }); }
   else if (id === 'key') window.oo.voiceCapture().catch((err) => toast(err.message));
   else if (id === 'mode') set({ mode: v.mode === 'toggle' ? 'hold' : 'toggle' });
-  else if (id === 'target') { stPick = { sel: Math.max(0, targetChoices().findIndex((c) => c.key === v.target)) }; sig = ''; render(); }
+  else if (id === 'target') { stPick = { what: 'voice', sel: Math.max(0, targetChoices('voice').findIndex((c) => c.key === v.target)) }; sig = ''; render(); }
+  else if (id === 'shotTarget') { stPick = { what: 'shot', sel: Math.max(0, targetChoices('shot').findIndex((c) => c.key === S.shot.target)) }; sig = ''; render(); }
+  else if (id === 'clipRoute') set({ clipRoute: v.clipRoute === 'auto' ? 'fixed' : 'auto' });
+  else if (id === 'clipTarget') { stPick = { what: 'clip', sel: Math.max(0, targetChoices('clip').findIndex((c) => c.key === v.clipTarget)) }; sig = ''; render(); }
+  else if (id === 'shotAsk') window.oo.shotSet({ ask: !S.shot.ask }).catch((err) => toast(err.message));
+  else if (id === 'shotPlastic') window.oo.shotSet({ plastic: !S.shot.plastic }).catch((err) => toast(err.message));
   else if (id === 'enter') set({ enter: !v.enter });
   else if (id === 'beep') set({ beep: !v.beep });
   else if (id === 'speed') set({ speed: nextSpeed(v.speed || 1.75, 1) });
@@ -349,10 +385,13 @@ function nextSpeed(cur, d) {
 }
 
 function chooseTarget(key) {
+  const what = stPick && stPick.what;
   const c = targetChoices().find((x) => x.key === key);
   stPick = null;
   sig = '';
-  if (c) window.oo.voiceSet(c.p ? { target: c.key, targetLabel: c.p.label, targetHost: c.p.host } : { target: 'focused' }).catch((err) => toast(err.message));
+  if (c && what === 'shot') window.oo.shotSet(c.p ? { target: c.key, targetLabel: c.p.label, targetHost: c.p.host } : { target: 'recent' }).catch((err) => toast(err.message));
+  else if (c && what === 'clip') window.oo.voiceSet(c.p ? { clipTarget: c.key, clipTargetLabel: c.p.label, clipTargetHost: c.p.host } : { clipTarget: c.key }).catch((err) => toast(err.message));
+  else if (c) window.oo.voiceSet(c.p ? { target: c.key, targetLabel: c.p.label, targetHost: c.p.host } : { target: 'focused' }).catch((err) => toast(err.message));
   render();
 }
 
@@ -450,6 +489,67 @@ function learnKey(e) {
   else if (e.key === 'Escape') { e.preventDefault(); closeLearn(); }
 }
 document.addEventListener('input', (e) => { if (e.target.id === 'ln' && learn) learn.text = e.target.value; });
+// ---------- your screen ("v"): a picture of it to an agent, with a question ----------
+//
+// Agents most recent first, the default target ("Your screen goes to" in settings) picked.
+// With "Send it at once" set, "v" skips this and sends straight away.
+let shot = null; // { text, sel, pic: Promise<path|null>, busy }
+function shotChoices() {
+  const sh = S.shot || {};
+  const rank = (p) => (p.key === sh.recentKey ? Infinity : lastUsed(p));
+  return S.panes.filter((p) => p.kind).sort((a, b) => rank(b) - rank(a));
+}
+async function openShot() {
+  if (!(S.shot || {}).ask) {
+    collapse();
+    try { toast(`Sent your screen to ${await window.oo.shotNow()}`); } catch (err) { toast(err.message); }
+    return;
+  }
+  const list = shotChoices();
+  view = 'shot';
+  shot = { text: '', sel: Math.max(0, list.findIndex((p) => p.key === S.shot.key)), pic: window.oo.shotGrab(), busy: '' };
+  sig = '';
+  render();
+  const i = $('#sn');
+  if (i) i.focus();
+}
+function closeShot() { shot = null; view = 'agents'; sig = ''; if (document.activeElement) document.activeElement.blur(); render(); selectTop(); }
+function shotCard() {
+  const list = shotChoices();
+  shot.sel = Math.max(0, Math.min(shot.sel, list.length - 1));
+  const rows = list.map((p, i) => `<div class="row ${i === shot.sel ? 'kb' : ''}" data-shot-to="${i}">
+      <span class="st ${status(p)}"></span>
+      <div class="mid"><div class="t1"><span class="nm">${esc(p.label)}</span><span class="kind">${esc(p.kind)} · ${esc(p.host)}</span></div>
+      <div class="t2">${esc(p.title || p.summary || subline(p))}</div></div>
+      <span class="age">${esc(when(p))}</span></div>`).join('') || '<div class="empty">No agents running</div>';
+  const html = `<div class="head"><h1>Send your screen</h1><button class="x" data-close>${X}</button></div>
+    <div class="reply"><input id="sn" placeholder="What should they look at? (optional)" spellcheck="false" autocomplete="off" value="${esc(shot.text)}"><button data-shot-send title="Send">${SEND}</button></div>
+    ${shot.busy ? `<div class="empty">${esc(shot.busy)}</div>` : ''}${rows}`;
+  return { html, hint: '<kbd>↑</kbd><kbd>↓</kbd> pick · <kbd>Enter</kbd> send · <kbd>Esc</kbd> back' };
+}
+async function sendShot() {
+  const p = shotChoices()[shot.sel];
+  if (!p || shot.busy) return;
+  const i = $('#sn');
+  shot.text = i ? i.value : shot.text;
+  shot.busy = 'Sending…'; sig = ''; render();
+  try {
+    const to = await window.oo.shotSend({ key: p.key, text: shot.text, shot: await shot.pic });
+    toast(`Sent your screen to ${to}`);
+    shot = null; view = 'agents'; sig = '';
+    collapse();
+  } catch (err) { shot.busy = err.message; sig = ''; render(); }
+}
+function shotKey(e) {
+  const n = shotChoices().length;
+  const down = e.key === 'ArrowDown' || (e.ctrlKey && (e.key === 'j' || e.key === 'n'));
+  const up = e.key === 'ArrowUp' || (e.ctrlKey && (e.key === 'k' || e.key === 'p'));
+  if ((down || up) && n) { e.preventDefault(); shot.sel = (shot.sel + (down ? 1 : -1) + n) % n; render(); reveal(); }
+  else if (e.key === 'Enter') { e.preventDefault(); sendShot(); }
+  else if (e.key === 'Escape') { e.preventDefault(); closeShot(); }
+}
+document.addEventListener('input', (e) => { if (e.target.id === 'sn' && shot) shot.text = e.target.value; });
+
 let projCache = null;
 const AGENT_KINDS = ['claude', 'codex'];
 const base = (s) => String(s || '').replace(/[\\/]+$/, '').split(/[\\/]/).pop().toLowerCase();
@@ -714,7 +814,7 @@ function projectKey(e) {
     const up = e.key === 'ArrowUp' || (e.ctrlKey && (e.key === 'k' || e.key === 'p'));
     if (down || up) {
       e.preventDefault();
-      if (n) { proj.sel = (proj.sel + (down ? 1 : -1) + n) % n; render(); const row = body.querySelector('.row.kb'); if (row) row.scrollIntoView({ block: 'nearest' }); }
+      if (n) { proj.sel = (proj.sel + (down ? 1 : -1) + n) % n; render(); reveal(); }
     } else if (e.key === 'Enter') { e.preventDefault(); choose(proj.sel); }
     else if (e.key === 'Escape') { e.preventDefault(); if (proj.q) { proj.q = ''; proj.sel = 0; render(); } else closeProjects(); }
     else if (e.key === 'Tab') e.preventDefault();
@@ -745,12 +845,13 @@ function render() {
   const projecting = view === 'project' && proj;
   const setting = view === 'settings' && HAS_SETTINGS;
   const learning = view === 'learn' && learn;
-  const { html, hint } = learning ? learnCard() : projecting ? projectCard() : setting ? settingsCard() : showInbox ? inboxCard(items) : agentsCard();
-  const next = `${learning ? 'l' : projecting ? 'p' : setting ? 's' : showInbox ? 'i' : 'a'}|${html}|${hint}`;
+  const shooting = view === 'shot' && shot;
+  const { html, hint } = shooting ? shotCard() : learning ? learnCard() : projecting ? projectCard() : setting ? settingsCard() : showInbox ? inboxCard(items) : agentsCard();
+  const next = `${shooting ? 'v' : learning ? 'l' : projecting ? 'p' : setting ? 's' : showInbox ? 'i' : 'a'}|${html}|${hint}`;
   if (next !== sig) {
     // keep the reply or search box focused, caret and all, across the rebuild
     const a = document.activeElement;
-    const focused = a && ['reply', 'q', 'pq', 'pn', 'stt', 'ln'].includes(a.id) ? a.id : null;
+    const focused = a && ['reply', 'q', 'pq', 'pn', 'stt', 'ln', 'sn'].includes(a.id) ? a.id : null;
     const caret = focused ? a.selectionStart : 0;
     const top = body.scrollTop;
     body.innerHTML = html;
@@ -809,6 +910,7 @@ function collapse() {
   stEdit = false;
   if ((S.voice || {}).capturing && window.oo.voiceCancel) window.oo.voiceCancel();
   if (proj) { proj = null; view = 'agents'; }
+  if (shot) { shot = null; view = 'agents'; }
   root.classList.replace('expanded', 'collapsed');
   showHint(false);
   fit();
@@ -873,8 +975,48 @@ function step(d) {
     kb = kb < 0 ? (d > 0 ? 0 : n - 1) : (kb + d + n) % n;
   }
   render();
+  reveal();
+}
+
+// scroll the selected row into view, with its host heading when it's the first under one
+// (otherwise moving up with the keys never shows the heading)
+function reveal() {
   const row = body.querySelector('.row.kb');
-  if (row) row.scrollIntoView({ block: 'nearest' });
+  if (!row) return;
+  if (row === body.querySelector('.row')) body.scrollTop = 0;
+  const prev = row.previousElementSibling;
+  if (prev && prev.classList.contains('host')) prev.scrollIntoView({ block: 'nearest' });
+  row.scrollIntoView({ block: 'nearest' });
+}
+
+// gg / G: the first or last row (or inbox item)
+let lastG = 0;
+function edge(d) {
+  if (view === 'inbox' && inbox().length) {
+    const items = inbox();
+    cur = items[d > 0 ? items.length - 1 : 0].key;
+    render();
+    return;
+  }
+  const n = body.querySelectorAll('.row').length;
+  if (!n) return;
+  kb = d > 0 ? n - 1 : 0;
+  render();
+  reveal();
+}
+
+// Shift+Tab: the first row under the next machine's heading, back to the top after the last
+function nextHost() {
+  const rows = [...body.querySelectorAll('.row')];
+  const firsts = rows.map((r, i) => i).filter((i) => {
+    const prev = rows[i].previousElementSibling;
+    return prev && prev.classList.contains('host');
+  });
+  if (!firsts.length) return;
+  const at = firsts.find((i) => i > kb);
+  kb = at === undefined ? firsts[0] : at;
+  render();
+  reveal();
 }
 
 function hidePeek() {
@@ -923,10 +1065,10 @@ $('#b-term').addEventListener('click', () => {
 });
 
 body.addEventListener('click', (e) => {
-  const t = e.target.closest('[data-setting],[data-target],[data-close],[data-jump],[data-n],[data-send],[data-cur],[data-proj],[data-row],[data-start],[data-code],[data-ask],[data-sleep],[data-wake],[data-forget],[data-pick],[data-tidy],[data-tidy-go],[data-tidy-x],[data-learn]');
+  const t = e.target.closest('[data-setting],[data-target],[data-close],[data-jump],[data-n],[data-send],[data-cur],[data-proj],[data-row],[data-start],[data-code],[data-ask],[data-sleep],[data-wake],[data-forget],[data-pick],[data-tidy],[data-tidy-go],[data-tidy-x],[data-learn],[data-shot-to],[data-shot-send]');
   if (!t) return;
   if (t.dataset.setting) { sk = settingRows().findIndex((r) => r.id === t.dataset.setting); if (!stEdit || t.dataset.setting !== 'stt') changeSetting(t.dataset.setting); return; }
-  if (t.dataset.target) { chooseTarget(t.dataset.target); return; }
+  if (t.dataset.target !== undefined) { chooseTarget(t.dataset.target); return; }
   if (t.dataset.sleep) { e.stopPropagation(); sleepAgents([t.dataset.sleep]); return; }
   if (t.dataset.wake) { wake(t.dataset.wake); return; }
   if (t.dataset.forget) { window.oo.forgetSleeping(t.dataset.forget).catch((err) => toast(err.message)); return; }
@@ -948,6 +1090,8 @@ body.addEventListener('click', (e) => {
   else if (t.dataset.n) answer(cur, Number(t.dataset.n));
   else if (t.dataset.send !== undefined) sendReply();
   else if (t.dataset.learn !== undefined) sendLearn();
+  else if (t.dataset.shotTo !== undefined) { shot.sel = Number(t.dataset.shotTo); render(); const i = $('#sn'); if (i) i.focus(); }
+  else if (t.dataset.shotSend !== undefined) sendShot();
   else if (t.dataset.cur) { cur = t.dataset.cur; render(); }
 });
 body.addEventListener('input', (e) => {
@@ -993,6 +1137,8 @@ document.addEventListener('keydown', (e) => {
   const typing = e.target.tagName === 'INPUT';
   if (e.target.id === 'q') return searchKey(e);
   if (e.target.id === 'ln') return learnKey(e);
+  if (e.target.id === 'sn') return shotKey(e);
+  if (view === 'shot' && shot) { if (e.key === 'Escape') { e.preventDefault(); closeShot(); } return; }
   if (view === 'project' && proj) return projectKey(e);
   // listening for a new push-to-talk key: the keys are for that, not for the panel
   if ((S.voice || {}).capturing) { e.preventDefault(); return; }
@@ -1001,13 +1147,17 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && query !== null && !typing) { closeSearch(); return; }
   if (e.key === 'Escape') { if (typing) e.target.blur(); else collapse(); return; }
   if (typing) { if (e.key === 'Enter' && e.target.id === 'reply') sendReply(); return; }
+  if (e.key === 'd' && view === 'inbox' && inbox().length) { e.preventDefault(); dismissCur(); return; }
   const q = curAsk();
   if (q && /^[1-4]$/.test(e.key) && q.options[Number(e.key) - 1]) { answerAsk(q.id, q.options[Number(e.key) - 1].id); return; }
   if (q && (e.key === 'Enter' || e.key === 'r')) return;
   const p = view === 'inbox' && inbox().length ? find(cur) : null;
   if (p && p.state === 'input' && /^[1-9]$/.test(e.key) && (p.options || []).some((o) => o.n === Number(e.key))) {
     answer(p.key, Number(e.key));
-  } else if (e.key === 'Tab' || e.key === 'a') { e.preventDefault(); switchView(); }
+  } else if (e.key === 'Tab' && e.shiftKey && view === 'agents') { e.preventDefault(); nextHost(); }
+  else if (e.key === 'G') { e.preventDefault(); edge(1); }
+  else if (e.key === 'g') { e.preventDefault(); if (Date.now() - lastG < 500) { lastG = 0; edge(-1); } else lastG = Date.now(); }
+  else if (e.key === 'Tab' || e.key === 'a') { e.preventDefault(); switchView(); }
   else if (e.key === 'h' || e.key === 'l') { e.preventDefault(); moveView(e.key === 'l' ? 1 : -1); }
   else if (e.key === 'ArrowDown' || e.key === 'ArrowRight' || e.key === 'j') { e.preventDefault(); step(1); }
   else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft' || e.key === 'k') { e.preventDefault(); step(-1); }
@@ -1017,6 +1167,8 @@ document.addEventListener('keydown', (e) => {
   } else if (e.key === '/') { e.preventDefault(); openSearch(); }
   else if (e.key === 'n' && window.oo.projects) { e.preventDefault(); openProjects(); }
   else if (e.key === 'p' && window.oo.learn) { e.preventDefault(); openLearn(); }
+  else if (e.key === 'v' && window.oo.shotSend) { e.preventDefault(); openShot(); }
+  else if (e.key === 'm' && window.oo.plastic) { e.preventDefault(); collapse(); window.oo.plastic().catch((err) => toast(err.message)); }
   else if (e.key === 's' && window.oo.saved) { e.preventDefault(); collapse(); window.oo.saved().catch((err) => toast(err.message)); }
   else if (e.key === 'o' && window.oo.code && view === 'agents' && kb >= 0) {
     const row = body.querySelectorAll('.row')[kb];

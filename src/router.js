@@ -145,24 +145,32 @@ class Router {
     return { route: 'note', to: '', why: `jev ${pct}`, p };
   }
 
-  async classify(text, agents, defaultTo) {
+  // strict: overheard talk (an always-listening mic), so it goes to an agent only when it's
+  // clearly meant for one: a cue, or jev at least overheardAt (0.8: room talk scores up to ~0.75);
+  // no following the last note
+  async classify(text, agents, defaultTo, strict = false) {
     const names = agents.map((a) => a.name);
     const c = cue(text);
-    if (c) return c.route === 'agent' ? { route: defaultTo ? 'agent' : 'note', to: defaultTo, why: c.why, text: c.text } : { route: 'note', to: '', why: c.why };
+    // overheard, saying a name ("so openone just heard this") isn't talking to it: jev decides
+    if (c && !(strict && c.route === 'agent')) return c.route === 'agent' ? { route: defaultTo ? 'agent' : 'note', to: defaultTo, why: c.why, text: c.text } : { route: 'note', to: '', why: c.why };
     let jevError = '';
     if (this.cfg.jev && this.cfg.jev.url && this.cfg.jev.key) {
-      try { return await this.score(text, agents, defaultTo); } catch (e) { jevError = String(e.message || e); }
+      try {
+        const out = await this.score(text, agents, defaultTo);
+        if (strict && out.route === 'agent' && out.p < (this.cfg.jev.overheardAt || 0.8)) return { route: 'note', to: '', why: `${out.why}, not sure enough`, p: out.p };
+        return out;
+      } catch (e) { jevError = String(e.message || e); }
     }
-    const out = await this.fallback(text, agents, defaultTo, names);
+    const out = await this.fallback(text, agents, defaultTo, names, strict);
     if (jevError) out.why = `${out.why} (${jevError})`;
     return out;
   }
 
-  async fallback(text, agents, defaultTo, names) {
+  async fallback(text, agents, defaultTo, names, strict = false) {
     // mid-conversation: a note soon after one that went to an agent goes there too ("note" opts out)
     const last = this.sent[this.sent.length - 1];
     const sticky = (this.cfg.stickyMin ?? 10) * 60000;
-    if (last && Date.now() - last.at < sticky && names.includes(last.to)) return { route: 'agent', to: last.to, why: 'follows a note sent to it' };
+    if (!strict && last && Date.now() - last.at < sticky && names.includes(last.to)) return { route: 'agent', to: last.to, why: 'follows a note sent to it' };
     if (!this.cfg.url) return { route: 'note', to: '', why: 'no router model configured' };
     try {
       const r = await fetch(this.cfg.url, {
@@ -182,15 +190,30 @@ class Router {
     }
   }
 
-  // { text, source, refile } -> { route, to, why, p?, ms, sent? }
+  // { text, source, refile, strict, to, fallback, quiet } -> { route, to, why, p?, ms, sent? }
   // refile: a URL the caller wants POSTed if the agent says the note wasn't for it
-  async route({ text, source = 'ring', refile = '' }) {
+  // strict: overheard, see classify; to: the agent it goes to if it's for an agent at all;
+  // fallback: where it goes when it would be a note (said on purpose, so never dropped);
+  // quiet: don't say where it went (the caller shows it); direct: straight to `to`, no sorting
+  // (the caller knows who it's for, e.g. a tutor he's talking with)
+  async route({ text, source = 'ring', refile = '', strict = false, to = '', fallback = '', quiet = false, direct = false }) {
     const t0 = Date.now();
     const clean = String(text || '').trim();
     if (!clean) return { route: 'note', to: '', why: 'empty', ms: 0 };
+    const tell = quiet ? () => {} : (o) => this.tell(o);
     const agents = this.roster();
-    const defaultTo = this.defaultTo(agents);
-    const out = await this.classify(clean, agents, defaultTo);
+    const running = (t) => {
+      let n = '';
+      try { n = t ? this.resolve(t) || '' : ''; } catch {}
+      return agents.some((a) => a.name === n) ? n : '';
+    };
+    const fixed = running(to);
+    const defaultTo = fixed || this.defaultTo(agents);
+    if (direct && !fixed) return { route: 'note', to: '', why: `${to || 'that agent'} isn't running`, ms: Date.now() - t0 };
+    let out = direct ? { route: 'agent', to: fixed, why: 'direct' } : await this.classify(clean, agents, defaultTo, strict);
+    if (out.route === 'agent' && fixed) out.to = fixed;
+    const back = running(fallback);
+    if (out.route !== 'agent' && back) out = { route: 'agent', to: back, why: `${out.why}; sent anyway`, text: out.text };
     if (out.route === 'agent') {
       // unsure: say so, and give the agent a way to hand it back
       let tag = `[${source}]`;
@@ -203,12 +226,12 @@ class Router {
         this.sent.push({ to: out.to, text: out.text || clean, at: Date.now() });
       } catch (e) {
         const failed = { route: 'note', to: '', why: `couldn't send: ${String(e.message || e)}`, ms: Date.now() - t0 };
-        this.tell(failed);
+        tell(failed);
         return failed;
       }
     }
     delete out.text;
-    this.tell(out);
+    tell(out);
     return { ...out, ms: Date.now() - t0 };
   }
 

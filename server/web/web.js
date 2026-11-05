@@ -350,6 +350,7 @@
     wake: async (id) => (await call('POST', `api/sleeping/${enc(id)}/wake`)).key,
     forgetSleeping: (id) => call('DELETE', `api/sleeping/${enc(id)}`),
     answerAsk: (id, option) => call('POST', `api/asks/${enc(id)}/answer`, { option, by: 'web' }),
+    dismissAsk: (id) => call('DELETE', `api/asks/${enc(id)}`),
     projects: () => call('GET', 'api/projects'),
     semantic: (q) => call('GET', `api/projects/semantic?q=${enc(q)}`),
     startProject: async (opts) => { const r = await call('POST', 'api/projects', opts); viewer(r.key); return r.key; },

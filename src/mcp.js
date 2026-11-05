@@ -137,6 +137,7 @@ const INSTRUCTIONS = 'openone sees every Claude and Codex agent running in tmux/
   'When you get such a message, treat it as a request from a sibling agent, not from the user, and answer with send to its sender. ' +
   'Make each message self-contained: the receiver does not share your context. For long content, write a file and send its path. ' +
   'peek shows another agent\'s screen. projects and ls browse the project folders on each host; start launches a new agent in one, ' +
+  'and code opens one in VS Code on the user\'s computer; ' +
   'with an optional first message. ask puts a question with buttons on the user\'s phone (approve this, pick one) ' +
   'and waits for the tap; use it instead of stopping to wait for the user when one quick decision unblocks you. ' +
   'board_read and board_draw share a whiteboard with the user: read it when they say they drew something for you, draw on it to sketch a diagram for them. ' +
@@ -199,6 +200,18 @@ const TOOLS = [
         resume: { type: 'boolean', description: 'Continue the folder\'s last conversation instead of a new one.' },
       },
       required: ['host', 'folder'],
+    },
+  },
+  {
+    name: 'code',
+    description: 'Open a project in VS Code on the computer the user is at (remote hosts over Remote-SSH). Give agent to open that agent\'s folder, or host and folder for a project. Returns once the window is opening, or says why it could not.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        agent: { type: 'string', description: 'Agent name from roster: open its folder.' },
+        host: { type: 'string' },
+        folder: { type: 'string', description: 'Project folder name in the host\'s workspace (see projects).' },
+      },
     },
   },
   {
@@ -338,6 +351,10 @@ async function run(name, a, who) {
   if (name === 'start') {
     const r = await call('POST', 'start', a, who);
     return `Started ${r.name}. ${r.note}.`;
+  }
+  if (name === 'code') {
+    const r = await call('POST', 'code', { agent: a.agent, host: a.host, folder: a.folder }, who);
+    return `Opening ${r.target.folder || r.target.dir} (${r.target.host}) in VS Code on ${r.on}.`;
   }
   if (name === 'resources') return resourcesText(await call('GET', 'resources', { host: a.host }, who));
   if (name === 'speak') {

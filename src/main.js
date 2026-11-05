@@ -1,3 +1,4 @@
+const { answerAfter } = require('./shotanswer');
 const { app, BrowserWindow, ipcMain, screen, powerMonitor, globalShortcut, Notification, Tray, Menu, nativeImage, nativeTheme, shell, clipboard, desktopCapturer } = require('electron');
 const { execFileSync, spawn } = require('child_process');
 const fs = require('fs');
@@ -10,6 +11,7 @@ const projects = require('./projects');
 const { Embedder, semantic, projectText } = require('./embed');
 const { detect: detectConfig } = require('./setup');
 const voice = require('./voice');
+const voicein = require('./voicein');
 
 // Installed builds keep config in %APPDATA%\openone; a source checkout uses ./config.json.
 const CONFIG = app.isPackaged ? path.join(app.getPath('userData'), 'config.json') : path.join(__dirname, '..', 'config.json');
@@ -138,6 +140,7 @@ function state() {
     messages,
     asks,
     voice: voiceView(),
+    shot: shotView(),
   };
 }
 
@@ -163,9 +166,20 @@ async function isWatching(p) {
   return !!(fg.ok && fg.wt && fg.tab && h && new RegExp(tabPattern(h.cfg), 'i').test(fg.tab));
 }
 
+// A turn a service started (plastic's RAM page sending its listener an update) ends without
+// a ping: its answer goes back to that service, not to you. You still hear when it needs you.
+const SERVICE_TURN = 15 * 60e3;
+const touched = new Map(); // key -> when you last opened, answered or replied to it
+function serviceTurn(key) {
+  const m = messages.filter((x) => x.toKey === key && x.status === 'delivered').pop();
+  return !!m && !m.fromKey && !m.note && /^outside@/.test(m.from || '')
+    && Date.now() - m.at < SERVICE_TURN && m.at > (touched.get(key) || 0);
+}
+
 async function notify(ev) {
   const p = monitor.get(ev.key);
   if (!p || !cfg.notify[ev.type] || muted) return;
+  if (ev.type === 'done' && serviceTurn(ev.key)) { p.unseen = false; push(); return; }
   if (await isWatching(p)) { monitor.markSeen(ev.key); push(); return; }
   win.webContents.send('peek', { key: ev.key, type: ev.type });
   if (!cfg.notify.toast || !Notification.isSupported()) return;
@@ -183,7 +197,10 @@ async function pollHost(h) {
       const raws = await h.src.snapshot();
       h.ok = true;
       h.error = '';
-      for (const ev of monitor.ingest(h.cfg.name, raws)) notify(ev);
+      for (const ev of monitor.ingest(h.cfg.name, raws)) {
+        notify(ev);
+        if (ev.type === 'done' && shotAnswers.has(ev.key)) fileAnswer(h, ev.key);
+      }
       push();
       publish(h, raws);
       await sleep(h.cfg.pollMs || 1500);
@@ -234,24 +251,47 @@ function lookup(key) {
 async function jump(key) {
   const r = lookup(key);
   if (!r) return;
+  lastTouched = key;
   monitor.markSeen(key);
   tellServer(key);
   push();
   win.webContents.send('collapse');
   const pane = r.p.bg ? await r.h.src.attachBackground(r.p.bg).catch(() => null) : r.p;
-  if (pane) await r.h.src.focus(pane).catch(() => {});
-  await showHost(r.h);
+  await showPane(r.h, pane);
 }
 
-// a host's tab, by title (a regex); with none set, only its position (wtTabIndex) finds it
-const tabPattern = (hc) => hc.wtTab || '(?!)';
+// a host's tab, by title (a regex), or the tab openTab titled with its name; with neither
+// found, only its position (wtTabIndex) finds it
+const reEscape = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const tabPattern = (hc) => [hc.wtTab, `^${reEscape(hc.name)}$`].filter(Boolean).join('|');
 
-// Brings the host's Windows Terminal tab forward (by name, or by position when the tab
-// row is hidden, see wt-focus.ps1). Says so in a notification when it can't: the panel
-// has already closed, so its own toast would go unseen.
-async function showHost(h) {
-  const res = await wt.focus(tabPattern(h.cfg), h.cfg.wtTabIndex);
-  if (!res.ok) note(`Couldn't find the ${h.cfg.name} tab in Windows Terminal`, `${res.error || ''}. Set "wtTab" or "wtTabIndex" for ${h.cfg.name} in the config.`);
+// Points the host's terminal at the pane and brings its Windows Terminal tab forward (by
+// name, or by position when the tab row is hidden, see wt-focus.ps1). When no terminal is
+// attached to the host, or its tab can't be found, opens a new tab attached to the pane's
+// session instead, so nothing has to be opened and attached by hand first.
+async function showPane(h, pane) {
+  const attached = pane ? await h.src.focus(pane).catch(() => true) : true;
+  if (attached) {
+    const res = await wt.focus(tabPattern(h.cfg), h.cfg.wtTabIndex);
+    if (res.ok) return;
+    if (!pane) {
+      // the panel has already closed, so its own toast would go unseen
+      note(`Couldn't find the ${h.cfg.name} tab in Windows Terminal`, `${res.error || ''}. Set "wtTab" or "wtTabIndex" for ${h.cfg.name} in the config.`);
+      return;
+    }
+  }
+  openTab(h, pane.session);
+}
+
+// A new Windows Terminal tab (in the most recent window, or a new window) attached to a
+// session, titled with the host's name and kept so, so tabPattern finds it next time.
+function openTab(h, session) {
+  const argv = h.src.attachArgv && h.src.attachArgv(session);
+  if (!argv || process.platform !== 'win32') { note(`No terminal is showing ${h.cfg.name}`, `Attach to session ${session} to see it.`); return; }
+  const child = spawn('wt.exe', ['-w', '0', 'new-tab', '--title', h.cfg.name, '--suppressApplicationTitle', '--', ...argv],
+    { detached: true, stdio: 'ignore' });
+  child.on('error', (e) => note(`Couldn't open Windows Terminal for ${h.cfg.name}`, String(e.message || e)));
+  child.unref();
 }
 
 // ---------- projects ----------
@@ -282,12 +322,13 @@ async function startProject(opts) {
   if (!h) throw new Error('no such host');
   const pane = await projects.start(h, cfg, opts);
   win.webContents.send('collapse');
-  await h.src.focus(pane).catch(() => {});
-  await showHost(h);
+  await showPane(h, pane);
   return `${h.cfg.name}|${pane.session}|${pane.paneId}`;
 }
 
-// { key } opens a pane's folder, { host, folder } a project's; remote hosts over Remote-SSH
+// { key } opens a pane's folder, { host, folder } a project's, { host, dir } a folder by path
+// (an agent's, from the server); remote hosts over Remote-SSH. Resolves once `code` has
+// handed it to VS Code, or throws why not.
 async function openInCode(target) {
   let h;
   let dir;
@@ -298,20 +339,48 @@ async function openInCode(target) {
     dir = r.p.path;
   } else {
     h = hosts[target && target.host];
-    if (!h) throw new Error('no such host');
-    dir = h.src.join(await h.src.resolve(projects.workspace(h.cfg)), projects.checkName(target.folder));
+    if (!h) throw new Error(`no host "${target && target.host}" in this computer's openone config`);
+    dir = target.dir || h.src.join(await h.src.resolve(projects.workspace(h.cfg)), projects.checkName(target.folder));
   }
-  if (!dir || /["\r\n]/.test(dir)) throw new Error('no folder to open');
+  if (!dir || /["\r\n%]/.test(dir)) throw new Error('no folder to open');
   const args = projects.vscodeArgs(h.cfg, dir).map((a) => `"${a}"`);
   // `code` is a .cmd, so it needs a shell; the folder was checked for quotes above
-  spawn(`${cfg.vscode || 'code'} ${args.join(' ')}`, { shell: true, detached: true, stdio: 'ignore', windowsHide: true }).unref();
+  const child = spawn(`${cfg.vscode || 'code'} ${args.join(' ')}`, { shell: true, detached: true, stdio: 'ignore', windowsHide: true });
+  child.unref();
   win.webContents.send('collapse');
+  // the CLI exits once VS Code has it; a missing `code` fails fast. Slow: assume it's on its way.
+  const code = await new Promise((resolve) => {
+    const t = setTimeout(() => resolve(0), 10000);
+    child.on('error', () => { clearTimeout(t); resolve(-1); });
+    child.on('exit', (c) => { clearTimeout(t); resolve(c || 0); });
+  });
+  if (code) throw new Error(`${cfg.vscode || 'code'} exited with ${code} (is the VS Code CLI on PATH?)`);
+}
+
+// ---------- the code tool: an agent asks the server to open a project here ----------
+async function pollOpens() {
+  for (;;) {
+    try {
+      const idle = powerMonitor.getSystemIdleTime() * 1000;
+      const r = await fetch(`${serverUrl()}/api/open?for=${encodeURIComponent(dropName())}&idle=${idle}&wait=25`, { signal: AbortSignal.timeout(40000) });
+      if (!r.ok) { await sleep(5000); continue; }
+      for (const it of await r.json()) {
+        let report = { ok: true };
+        try { await openInCode(it.target); } catch (e) { report = { ok: false, error: String(e.message || e) }; }
+        vlog(`open in code for ${it.from || 'an agent'}: ${it.target.folder || it.target.dir} (${it.target.host}) ${report.ok ? 'ok' : report.error}`);
+        await fetch(`${serverUrl()}/api/open/${encodeURIComponent(it.id)}`, {
+          method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(report),
+        }).catch(() => {});
+      }
+    } catch { await sleep(5000); }
+  }
 }
 
 async function answer(key, n) {
   const r = lookup(key);
   if (!r) return;
   await actions.answer(r.h.src, r.p, n);
+  lastTouched = key;
   monitor.markSeen(key);
   tellServer(key);
   push();
@@ -321,6 +390,7 @@ async function reply(key, text) {
   const r = lookup(key);
   if (!r || !text.trim()) return;
   await actions.reply(r.h.src, r.p, text);
+  lastTouched = key;
   monitor.markSeen(key);
   tellServer(key);
   push();
@@ -343,6 +413,7 @@ function menuTemplate() {
       { label: 'Send clipboard to phone', click: () => sendClipboard().catch((e) => note("Couldn't send", e.message)) },
       { type: 'separator' },
     ] : []),
+    ...(plasticCfg() ? [{ label: 'plastic', click: () => openPlastic().catch((e) => note("Couldn't open plastic", e.message)) }, { type: 'separator' }] : []),
     { label: 'Settings (push-to-talk)', click: () => openSettings() },
     { label: 'Show shells too', type: 'checkbox', checked: !!cfg.showShells, click: () => { cfg.showShells = !cfg.showShells; push(); } },
     { label: 'Mute notifications', type: 'checkbox', checked: muted, click: () => { muted = !muted; push(); } },
@@ -426,6 +497,7 @@ app.whenReady().then(() => {
   startHosts();
   voiceIpc();
   applyVoice();
+  startVoiceIn();
   tray = new Tray(trayIcon());
   tray.setToolTip('openone');
   tray.on('click', toggle);
@@ -469,6 +541,13 @@ app.whenReady().then(() => {
     asks = asks.filter((a) => a.id !== id);
     push();
   });
+  // withdrawn without an answer: the agent isn't told (a stale question)
+  ipcMain.handle('ask:dismiss', async (_e, id) => {
+    const r = await fetch(`${serverUrl()}/api/asks/${encodeURIComponent(id)}`, { method: 'DELETE', signal: AbortSignal.timeout(8000) });
+    if (!r.ok && r.status !== 404) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`);
+    asks = asks.filter((a) => a.id !== id);
+    push();
+  });
   ipcMain.on('pane:seen', (_e, key) => { monitor.markSeen(key); push(); tellServer(key); });
   if (cfg.server) {
     for (const [key, fn] of [[boardKey(), toggleBoard], [overlayKey(), toggleOverlay]]) {
@@ -479,7 +558,8 @@ app.whenReady().then(() => {
     }
   }
   restartShortcut();
-  if (cfg.server) { pollMessages(); pollDrops(); pollSpeech(); sendToShortcut(); sendFilesFromArgs(process.argv); }
+  keepPlastic();
+  if (cfg.server) { pollMessages(); pollDrops(); pollSpeech(); pollOpens(); sendToShortcut(); sendFilesFromArgs(process.argv); }
 });
 
 // "server": "https://..." — the openone server that carries messages between agents.
@@ -501,6 +581,7 @@ async function pollMessages() {
   }
 }
 function tellServer(key) {
+  if (key) touched.set(key, Date.now());
   if (!cfg.server || !key) return;
   fetch(`${serverUrl()}/api/panes/${encodeURIComponent(key)}/seen`, { method: 'POST', signal: AbortSignal.timeout(8000) }).catch(() => {});
 }
@@ -563,7 +644,7 @@ function openSaved() {
   savedWin = new BrowserWindow({
     ...bounds, frame: false, alwaysOnTop: true, skipTaskbar: true, show: false, resizable: true,
     backgroundColor: '#0c0a09', roundedCorners: true, // the page is dark unless you switch it
-    webPreferences: { contextIsolation: true, nodeIntegration: false },
+    webPreferences: { contextIsolation: true, nodeIntegration: false, preload: path.join(__dirname, 'saved-preload.js') },
   });
   savedWin.loadURL(url);
   savedWin.once('ready-to-show', () => { savedWin.show(); savedWin.focus(); });
@@ -574,6 +655,115 @@ function openSaved() {
 }
 
 ipcMain.handle('saved:open', () => openSaved());
+
+// ---------- plastic ----------
+// plastic (D:\Code\plastic: the RAM of a study session, the lab, recap videos) is its own
+// server. openone keeps it running (openone starts at login, so plastic comes back after a
+// reboot) and "m" in the panel opens it in an app window. Started detached, so restarting
+// openone doesn't end a session; its output goes to plastic.log in openone's data folder.
+//   "plastic": { "dir": "D:/Code/plastic", "page": "/v2" }, or false to leave it alone
+// (plasticRam, the shot code's setting, is where it listens: default http://127.0.0.1:8843)
+const plasticCfg = () => (cfg.plastic === false ? null : { dir: 'D:/Code/plastic', page: '/v2', ...(cfg.plastic || {}) });
+let plasticStarted = 0;
+let plasticWin = null;
+
+function plasticUp() {
+  return new Promise((resolve) => {
+    const u = new URL(plasticUrl());
+    const sock = require('net').connect(Number(u.port) || 80, u.hostname);
+    const done = (ok) => { sock.destroy(); resolve(ok); };
+    sock.setTimeout(1500, () => done(false));
+    sock.once('connect', () => done(true));
+    sock.once('error', () => done(false));
+  });
+}
+
+// -> true once it's listening
+async function ensurePlastic() {
+  const pc = plasticCfg();
+  if (!pc) return false;
+  if (await plasticUp()) return true;
+  const server = path.join(pc.dir, 'ram', 'server.js');
+  if (!fs.existsSync(server)) return false;
+  // one start a minute: a server that dies at once shouldn't be restarted in a loop
+  if (Date.now() - plasticStarted > 60000) {
+    plasticStarted = Date.now();
+    const log = fs.openSync(path.join(app.getPath('userData'), 'plastic.log'), 'a');
+    const child = spawn('node', [server], { cwd: path.dirname(server), detached: true, windowsHide: true, stdio: ['ignore', log, log] });
+    child.on('error', (e) => note("Couldn't start plastic", String(e.message || e)));
+    child.unref();
+    fs.closeSync(log);
+  }
+  for (let i = 0; i < 20; i++) { await sleep(500); if (await plasticUp()) return true; }
+  return false;
+}
+
+function keepPlastic() {
+  if (!plasticCfg()) return;
+  ensurePlastic().catch(() => {});
+  setInterval(() => ensurePlastic().catch(() => {}), 60000);
+}
+
+async function openPlastic() {
+  if (plasticWin && !plasticWin.isDestroyed()) { plasticWin.show(); plasticWin.focus(); return; }
+  if (!(await ensurePlastic())) throw new Error(`plastic isn't running and couldn't be started (see plastic.log in ${app.getPath('userData')})`);
+  const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
+  const w = Math.round(area.width * 0.8), h = Math.round(area.height * 0.85);
+  plasticWin = new BrowserWindow({
+    x: area.x + Math.round((area.width - w) / 2), y: area.y + Math.round((area.height - h) / 2), width: w, height: h,
+    title: 'plastic', autoHideMenuBar: true, show: false, icon: toastIcon(),
+    webPreferences: { contextIsolation: true, nodeIntegration: false },
+  });
+  const base = plasticUrl();
+  plasticWin.loadURL(`${base}${plasticCfg().page || '/'}`);
+  plasticWin.once('ready-to-show', () => { plasticWin.show(); plasticWin.focus(); });
+  // plastic's own pages (the lab, a recap video) open in another app window; the web, in the browser
+  plasticWin.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith(base)) return { action: 'allow', overrideBrowserWindowOptions: { autoHideMenuBar: true, icon: toastIcon() } };
+    if (/^https?:/.test(url)) shell.openExternal(url);
+    return { action: 'deny' };
+  });
+  plasticWin.webContents.on('will-navigate', (e, url) => { if (!url.startsWith(base)) { e.preventDefault(); if (/^https?:/.test(url)) shell.openExternal(url); } });
+  plasticWin.on('closed', () => { plasticWin = null; });
+}
+
+ipcMain.handle('plastic:open', () => openPlastic().catch((e) => note("Couldn't open plastic", e.message)));
+
+// "Sync" on /saved: your newest n bookmarks and likes from x.com (src/xsync.js), handed to the
+// server like the browser relay does. One sync at a time; a second press joins the first.
+let syncing = null;
+ipcMain.handle('saved:sync', (_e, n) => syncing || (syncing = (async () => {
+  const xsync = require('./xsync');
+  n = Math.max(1, Math.min(Number(n) || 30, 500));
+  const out = {};
+  for (const kind of ['bookmark', 'like']) {
+    const tweets = await xsync.collect(kind, n);
+    const r = await fetch(`${serverUrl()}/api/saved/ingest`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ tweets, kind, front: true }),
+      signal: AbortSignal.timeout(30000),
+    });
+    if (!r.ok) throw new Error(`server answered ${r.status}`);
+    out[kind] = { ...(await r.json()), seen: tweets.length };
+  }
+  return out;
+})().catch((e) => ({ error: e.message })).finally(() => { syncing = null; })));
+
+// Your X API credit balance, for the same page: eager-friend holds the X sign-in, so its
+// "credits" script asks (GET /2/usage/credits). "eagerFriend" in the config is its folder.
+let credits = null; // { at, value }
+ipcMain.handle('saved:credits', async () => {
+  if (credits && Date.now() - credits.at < 10 * 60e3) return credits.value;
+  const dir = cfg.eagerFriend || 'D:/Code/eager-friend';
+  const value = await new Promise((resolve) => {
+    const p = spawn('npx tsx src/bin/credits.ts', { cwd: dir, shell: true, windowsHide: true });
+    let out = '';
+    p.stdout.on('data', (c) => { out += c; });
+    p.on('error', (e) => resolve({ error: e.message }));
+    p.on('close', () => { try { resolve(JSON.parse(out.trim().split('\n').pop())); } catch { resolve({ error: 'eager-friend gave no balance' }); } });
+  });
+  if (!value.error) credits = { at: Date.now(), value };
+  return value;
+});
 
 // ---------- learning: "p" in the panel ----------
 //
@@ -615,6 +805,122 @@ async function learn({ text, shot }) {
 
 ipcMain.handle('learn:shot', () => learnShot().catch(() => null));
 ipcMain.handle('learn:send', (_e, m) => learn(m || {}));
+
+// ---------- your screen to an agent: "v" in the panel ----------
+//
+// "v" takes a picture of the screen under the mouse (the panel hides for it) and sends it to
+// an agent with what you type, for a second pair of eyes. "shot" in the config:
+//   target  'recent' (the agent you last messaged, answered or jumped to) or a pane key,
+//           with targetLabel/targetHost to find it again after it restarts
+//   ask     true: "v" opens a list of agents, the target picked; false: it sends at once
+//   plastic true: during a plastic session the picture also goes into its RAM (plasticRam in
+//           the config, default http://127.0.0.1:8843), whoever it was sent to
+// Agents on an ssh host get a copy of the picture there, in /tmp/openone-shots.
+
+let lastTouched = ''; // the agent you last messaged, answered or jumped to
+const scfg = () => ({ target: 'recent', ask: true, plastic: true, ...(cfg.shot || {}) });
+
+function recentAgent() {
+  const agents = monitor.view().filter((p) => p.kind);
+  return agents.find((p) => p.key === lastTouched) || agents.sort((a, b) => (b.used || 0) - (a.used || 0))[0] || null;
+}
+
+function shotTarget(s = scfg()) {
+  if (!s.target || s.target === 'recent') return recentAgent();
+  const agents = monitor.view().filter((p) => p.kind);
+  return agents.find((p) => p.key === s.target) || agents.find((p) => p.label === s.targetLabel && p.host === s.targetHost) || null;
+}
+
+function shotView() {
+  const s = scfg();
+  const p = shotTarget(s);
+  const recent = !s.target || s.target === 'recent';
+  const r = recentAgent();
+  return {
+    target: recent ? 'recent' : s.target, ask: s.ask !== false, plastic: s.plastic !== false, key: p ? p.key : '', recentKey: r ? r.key : '',
+    targetLabel: recent ? `The agent you used last${p ? ` (${p.label})` : ''}` : p ? `${p.label} · ${p.host}` : `${s.targetLabel || s.target} (not running)`,
+  };
+}
+
+function saveShot(patch) {
+  const raw = JSON.parse(fs.readFileSync(CONFIG, 'utf8'));
+  raw.shot = { ...(raw.shot || {}), ...patch };
+  fs.writeFileSync(CONFIG, `${JSON.stringify(raw, null, 2)}\n`);
+  cfg.shot = raw.shot;
+  push();
+}
+
+// the screen without the panel on it
+async function grabScreen() {
+  const shown = win && !win.isDestroyed() && win.isVisible();
+  if (shown) { win.setOpacity(0); await sleep(120); }
+  try { return await learnShot(); } finally { if (shown) win.setOpacity(1); }
+}
+
+// a copy of the picture on an ssh host, where its agent can read it ('' when it can't be done)
+function copyShot(h, file) {
+  if (h.cfg.type !== 'ssh' || !h.src.sshArgs) return Promise.resolve('');
+  const dest = `/tmp/openone-shots/${path.basename(file)}`;
+  return new Promise((resolve) => {
+    const p = spawn(h.src.ssh, h.src.sshArgs(`mkdir -p /tmp/openone-shots && cat > ${dest}`), { windowsHide: true });
+    const t = setTimeout(() => { p.kill(); resolve(''); }, 20000);
+    p.on('error', () => { clearTimeout(t); resolve(''); });
+    p.on('exit', (code) => { clearTimeout(t); resolve(code === 0 ? dest : ''); });
+    fs.createReadStream(file).pipe(p.stdin);
+  });
+}
+
+// the running plastic session keeps it too (nothing happens when none is running), and then
+// the agent's answer: when its turn ends, what it said after the screen goes in next to it
+const plasticUrl = () => String(cfg.plasticRam || 'http://127.0.0.1:8843').replace(/\/$/, '');
+const shotAnswers = new Map(); // pane key -> { id (the picture in the RAM), at }
+function toPlastic(shot, text, to, key) {
+  fetch(`${plasticUrl()}/api/shot`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ path: shot, text, to }), signal: AbortSignal.timeout(8000),
+  }).then((r) => r.json()).then((j) => { if (j && j.id) shotAnswers.set(key, { id: j.id, at: Date.now() }); }).catch(() => {});
+}
+const SHOT_MARK = '[screen, from the hotkey]';
+async function fileAnswer(h, key) {
+  const w = shotAnswers.get(key);
+  const p = monitor.get(key);
+  if (!w || !p) return;
+  if (Date.now() - w.at > 30 * 60e3) { shotAnswers.delete(key); return; }
+  const text = answerAfter(await h.src.screen(p, 400).catch(() => ''), SHOT_MARK);
+  if (!text) return; // a turn that ended before it got to the screen: wait for the next one
+  shotAnswers.delete(key);
+  fetch(`${plasticUrl()}/api/shot/answer`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ id: w.id, text, from: `${p.label} · ${p.host}` }), signal: AbortSignal.timeout(8000),
+  }).catch(() => {});
+}
+
+async function sendShot({ key, text, shot }) {
+  const r = lookup(key);
+  if (!r) throw new Error("that agent isn't running");
+  const local = !/^ssh/.test(r.h.cfg.type || '');
+  const at = shot ? (local ? shot : await copyShot(r.h, shot)) : '';
+  const ask = String(text || '').trim() || "Here's my screen. What do you make of it?";
+  if (shot && scfg().plastic !== false) toPlastic(shot, String(text || '').trim(), `${r.p.label} · ${r.p.host}`, key);
+  await reply(key, `[screen, from the hotkey] ${ask}${at ? `\n(their screen when they asked: ${at})` : shot ? '\n(a picture of their screen was taken but could not be copied to this host)' : ''}`);
+  return r.p.label;
+}
+
+// "v" with ask off: straight to the target
+async function shotNow() {
+  const p = shotTarget();
+  if (!p) throw new Error(scfg().target === 'recent' ? 'no agent to send it to yet' : `${scfg().targetLabel || 'that agent'} isn't running`);
+  return sendShot({ key: p.key, text: '', shot: await grabScreen() });
+}
+
+ipcMain.handle('shot:grab', () => grabScreen().catch(() => null));
+ipcMain.handle('shot:send', (_e, m) => sendShot(m || {}));
+ipcMain.handle('shot:now', () => shotNow());
+ipcMain.handle('shot:set', (_e, patch) => {
+  const clean = {};
+  for (const k of ['target', 'targetLabel', 'targetHost', 'ask', 'plastic']) if (patch && patch[k] !== undefined) clean[k] = patch[k];
+  saveShot(clean);
+});
 
 // ---------- drawing on the screen ----------
 //
@@ -845,6 +1151,7 @@ function voiceView() {
     mode: v.mode, target: focused ? 'focused' : v.target, focused,
     targetLabel: focused ? 'The focused window (paste)' : p ? `${p.label} · ${p.host}` : `${v.targetLabel || v.target} (not running)`,
     enter: !!v.enter, beep: v.beep !== false, stt: v.stt || '', speed: voiceSpeed(),
+    clips: v.clips !== false, clipRoute: v.clipRoute === 'auto' ? 'auto' : 'fixed', clipTarget: v.clipTarget || '', clipTargetLabel: clipTargetLabel(v),
     state: vState.state, capturing: vState.capturing, last: vState.last, error: vState.error || voice.hookProblem(),
   };
 }
@@ -1000,6 +1307,89 @@ async function heard(audio) {
   push();
 }
 
+// Clips other programs post (voicein.js; player-one's controller). Transcribed, then:
+//   "take me to fastudio"  jumps to that pane, like clicking it (checked first, it's instant)
+//   clipRoute "fixed"      typed into one chat: clipTarget (a pane key, or "recent" for the one
+//                          you used last), else the push-to-talk agent, else the one you used last
+//   clipRoute "auto"       the server's router (jev) picks the agent
+// A clip you held the buttons for is always delivered. One an always-listening mic overheard
+// only goes on when the router is sure it was for an agent; otherwise it's dropped. Never
+// pasted, since you're usually in a game then. "clips": false turns it off, "clipsPort" moves it.
+let voiceIn = null;
+function startVoiceIn() {
+  const v = vcfg();
+  if (v.clips === false || voiceIn) return;
+  voiceIn = voicein.listen({ port: Number(v.clipsPort) || 8955, log: vlog, onClip: clip });
+}
+
+function clipTarget(v = vcfg()) {
+  if (!monitor) return null;
+  if (v.clipTarget === 'recent') return recentAgent();
+  if (v.clipTarget) {
+    const agents = monitor.view().filter((p) => p.kind);
+    return agents.find((p) => p.key === v.clipTarget) || agents.find((p) => p.label === v.clipTargetLabel && p.host === v.clipTargetHost) || null;
+  }
+  return voiceTarget(v) || recentAgent();
+}
+
+function clipTargetLabel(v = vcfg()) {
+  if (v.clipTarget === 'recent') return 'The agent you used last';
+  const p = clipTarget(v);
+  if (v.clipTarget) return p ? `${p.label} · ${p.host}` : `${v.clipTargetLabel || v.clipTarget} (not running)`;
+  return 'Same as push to talk';
+}
+
+async function clip({ audio, mime, tag, mode, ms, window }) {
+  const v = vcfg();
+  const overheard = mode === 'always';
+  const auto = v.clipRoute === 'auto';
+  vlog(`clip ${mode} ${audio.length} bytes, ${ms} ms, ${tag.trim()}${window ? ` (${window})` : ''}`);
+  const sent = (to, text) => {
+    vState = { ...vState, last: { text, to, at: Date.now() } };
+    pill({ mode: 'ok', title: `Sent to ${to}`, detail: text });
+  };
+  try {
+    const text = await voice.transcribe({ url: v.stt, model: v.model, audio, mime });
+    vlog(`clip heard: ${text}`);
+    if (!text) { if (overheard) return; throw new Error("Didn't catch anything"); }
+    // a jump: "take me to X", or (held) just a name, matched closely
+    const q = voicein.navTarget(text);
+    const bare = !q && !overheard && voicein.navTarget(text, { bare: true });
+    const there = (q && voicein.findPane(q, monitor.view())) || (bare && voicein.findPane(bare, monitor.view(), 2.5));
+    if (there) {
+      await jump(there.key);
+      vlog(`clip: jumped to ${there.key}`);
+      pill({ mode: 'ok', title: `Jumped to ${there.label}`, detail: text });
+      return;
+    }
+    const p = clipTarget(v);
+    if (!auto && !overheard) {
+      if (!p) throw new Error(`${v.clipTargetLabel || 'No agent'} isn't running. Heard: ${text}`);
+      await reply(p.key, tag + text);
+      vlog(`clip sent to ${p.key}`);
+      sent(p.label, text);
+      return;
+    }
+    if (!auto && !p) { vlog('clip dropped: the chosen chat isn\'t running'); return; }
+    const r = await fetch(`${serverUrl()}/api/route`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(15000),
+      body: JSON.stringify({ text, source: 'voice', strict: overheard, to: auto ? '' : p.key, fallback: overheard || !p ? '' : p.key, quiet: true }),
+    });
+    const out = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(out.error || `router: HTTP ${r.status}`);
+    vlog(`clip routed: ${out.route} ${out.to || ''} (${out.why || ''})`);
+    if (out.route !== 'agent') {
+      if (overheard) return;
+      throw new Error(`No agent to send it to. Heard: ${text}`);
+    }
+    sent(String(out.to).split('@')[0], text);
+  } catch (e) {
+    vlog(`clip error: ${e.message}`);
+    pill({ mode: 'err', title: "Voice clip didn't send", detail: e.message });
+  }
+  push();
+}
+
 // ---------- agents speaking (speak, speech.js on the server) ----------
 const playQueue = [];
 let nowPlaying = null;
@@ -1043,7 +1433,7 @@ function stopSpeaking() {
 // how fast agents talk: 1.75x unless set ("speed" in "voice")
 const voiceSpeed = () => Math.min(4, Math.max(0.5, Number(vcfg().speed) || 1.75));
 
-const VOICE_KEYS = ['speed', 'enabled', 'mode', 'target', 'targetLabel', 'targetHost', 'enter', 'beep', 'stt', 'model', 'speak'];
+const VOICE_KEYS = ['speed', 'enabled', 'mode', 'target', 'targetLabel', 'targetHost', 'enter', 'beep', 'stt', 'model', 'speak', 'clipRoute', 'clipTarget', 'clipTargetLabel', 'clipTargetHost'];
 
 function voiceIpc() {
   ipcMain.on('rec:data', (_e, buf) => heard(Buffer.from(buf)));

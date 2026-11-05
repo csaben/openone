@@ -80,6 +80,22 @@ test('bus: reply chains stop at the hop limit; the user stepping in resets them'
   assert.doesNotThrow(() => bus.send({ from, to, content: 'fresh start' }));
 });
 
+test('bus: with the hop limit turned off, chains keep going', async () => {
+  const panes = [pane('a|0|%1', 'one'), pane('b|s|%2', 'two')];
+  const { bus, tick } = setup(panes);
+  bus.hopsOff = () => true;
+  const one = bus.whoami({ host: 'a', pane: '%1' });
+  const two = bus.whoami({ host: 'b', pane: '%2' });
+  let from = one;
+  let to = 'two';
+  for (let i = 0; i < HOPS + 3; i++) {
+    bus.send({ from, to, content: 'm' + i });
+    await bus.pump();
+    tick(1000);
+    [from, to] = from === one ? [two, 'one'] : [one, 'two'];
+  }
+});
+
 test('bus: a gone or exited target fails the message', async () => {
   const panes = [pane('a|0|%1', 'one'), pane('b|s|%2', 'two', { state: 'working' })];
   const { bus } = setup(panes);

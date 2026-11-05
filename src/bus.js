@@ -49,7 +49,9 @@ function typedLine(m) {
 
 class Bus {
   // monitor: has view(); deliver(p, text): types into a pane; now(): clock (tests)
-  constructor({ monitor, deliver, now = Date.now }) {
+  // hopsOff(): true while the user has turned the hop limit off (config hopsOffUntil)
+  constructor({ monitor, deliver, now = Date.now, hopsOff = () => false }) {
+    this.hopsOff = hopsOff;
     this.monitor = monitor;
     this.deliver = deliver;
     this.now = now;
@@ -130,7 +132,7 @@ class Bus {
       this.sent.set(from.key, t);
       const h = this.hopIn.get(from.key);
       if (h && now - h.at < HOP_WINDOW) hop = h.hop + 1;
-      if (hop >= HOPS) throw new Error(`hop limit: this exchange has gone back and forth ${HOPS} times between agents without the user stepping in; stop here and leave a summary for the user`);
+      if (hop >= HOPS && !this.hopsOff()) throw new Error(`hop limit: this exchange has gone back and forth ${HOPS} times between agents without the user stepping in; stop here and leave a summary for the user`);
     }
     const nm = this.names();
     const m = {

@@ -105,7 +105,7 @@ class Capture {
 async function transcribe({ url, model, audio, mime = 'audio/webm', timeoutMs = 60000 }) {
   if (!url) throw new Error('no speech-to-text server set');
   const form = new FormData();
-  form.append('file', new Blob([audio], { type: mime }), mime.includes('wav') ? 'speech.wav' : 'speech.webm');
+  form.append('file', new Blob([audio], { type: mime }), `speech.${mime.includes('wav') ? 'wav' : /mpeg|mp3/.test(mime) ? 'mp3' : mime.includes('ogg') ? 'ogg' : 'webm'}`);
   form.append('model', model || 'Systran/faster-whisper-small');
   const r = await fetch(url, { method: 'POST', body: form, signal: AbortSignal.timeout(timeoutMs) });
   const j = await r.json().catch(() => ({}));

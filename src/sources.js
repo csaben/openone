@@ -191,15 +191,18 @@ class TmuxSource {
     return all;
   }
 
+  // Points a terminal at the pane. Returns false when no terminal is attached to this host
+  // at all, so the caller can open one (attachArgv).
   async focus(p) {
     const cmds = [];
     const clients = (await this.realClients(0).catch(() => [])).sort((a, b) => a.recent - b.recent);
-    if (!clients.some((c) => c.session === p.session)) {
+    if (clients.length && !clients.some((c) => c.session === p.session)) {
       // move the most recently used terminal (never a control client) onto this pane's session
-      cmds.push(clients[0] ? ['switch-client', '-c', clients[0].name, '-t', p.session] : ['switch-client', '-t', p.session]);
+      cmds.push(['switch-client', '-c', clients[0].name, '-t', p.session]);
     }
     cmds.push(['select-window', '-t', `${p.session}:${p.windowIndex}`], ['select-pane', '-t', this.target(p)]);
     await this.batch(cmds);
+    return clients.length > 0;
   }
 
   async keys(p, keys) { await this.batch([['send-keys', '-t', this.target(p), ...keys]]); }
@@ -335,6 +338,9 @@ class LocalSource extends TmuxSource {
   get psmux() { return /psmux/i.test(this.bin); }
 
   controlSpawn(session) { return spawn(this.bin, ['-C', 'attach', '-t', session], { windowsHide: true }); }
+
+  // the command a new terminal tab runs to show a session
+  attachArgv(session) { return [this.bin, 'attach', '-t', session]; }
 
   // services (systemd, login items) often lack ~/.local/bin, where claude installs itself
   claude(args) {
@@ -551,7 +557,10 @@ class ShellSource extends TmuxSource {
 const sq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 
 class SshTmuxSource extends ShellSource {
-  get remoteShell() { return 'exec bash --norc --noprofile'; }
+  // "path" puts folders in front of PATH: ssh logins on a Mac don't have Homebrew's tmux
+  get pathPrefix() { return this.cfg.path ? `export PATH=${this.cfg.path}:"$PATH"; ` : ''; }
+
+  get remoteShell() { return `${this.pathPrefix}exec bash --norc --noprofile`; }
 
   get homeCommand() { return 'echo "$HOME"'; }
 
@@ -559,7 +568,10 @@ class SshTmuxSource extends ShellSource {
 
   render(argv) { return `tmux ${argv.map(sq).join(' ')} </dev/null 2>&1`; }
 
-  controlSpawn(session) { return spawn(this.ssh, this.sshArgs(`tmux -C attach -t ${sq(session)}`), { windowsHide: true }); }
+  controlSpawn(session) { return spawn(this.ssh, this.sshArgs(`${this.pathPrefix}tmux -C attach -t ${sq(session)}`), { windowsHide: true }); }
+
+  // one word per argument: Windows Terminal re-splits its command line and drops backslashes
+  attachArgv(session) { return [this.cfg.sshBin || 'ssh', '-t', this.cfg.ssh, ...(this.cfg.path ? ['export', `PATH=${this.cfg.path}:$PATH;`] : []), 'tmux', 'attach', '-t', sq(session)]; }
 
   // bash --norc doesn't have ~/.local/bin, where claude installs itself
   claudeCmd(args) { return `PATH="$HOME/.local/bin:$PATH" ${this.cfg.claude || 'claude'} ${args} </dev/null 2>/dev/null; echo`; }
@@ -618,6 +630,8 @@ class SshPsmuxSource extends ShellSource {
   controlSpawn(session) {
     return spawn(this.ssh, this.sshArgs(`"${this.cfg.psmux || 'psmux'}" -C attach -t ${session}`), { windowsHide: true });
   }
+
+  attachArgv(session) { return [this.cfg.sshBin || 'ssh', '-t', this.cfg.ssh, this.cfg.psmux || 'psmux', 'attach', '-t', session]; }
 
   get homeCommand() { return 'echo %USERPROFILE%'; }
 
