@@ -18,11 +18,27 @@ It's inspired by [One](https://getone.one/#what-it-is). I loved the side-screen 
 - **Edge tab**: one dot per active agent. Blue means working, amber means it needs your answer, green means finished.
 - **Inbox card**: shows the question or the command waiting for approval. Press `1`–`9` to answer, or type a reply.
 - **Toasts and a peek bubble** when an agent finishes or asks something. None for the pane you're already looking at.
-- **Click an agent** to select that pane in its real tmux session, switch Windows Terminal to the right tab and bring it forward.
+- **Click an agent** to select that pane in its real tmux session, switch to its terminal tab (Windows Terminal, Ghostty or Terminal.app) and bring it forward.
 
-Nothing is installed on the remote machine. openone reads panes with `tmux capture-pane` over one persistent ssh connection, and with `psmux` locally.
+Nothing is installed on the remote machine. openone reads panes with `tmux capture-pane` over one persistent ssh connection, and with `psmux` (Windows) or `tmux` (macOS) locally.
+
+## Platforms
+
+openone runs on **Windows** and **macOS**, built from this one repo.
+
+| | Windows 10/11 | macOS (Apple silicon) |
+|---|---|---|
+| Desktop app | installer, tray icon, edge dock | `.app`, menu bar, edge dock |
+| Local panes | psmux | tmux (Homebrew) |
+| Jumping to a pane | Windows Terminal tabs | Ghostty tabs, or Terminal.app |
+| Panel hotkey | Ctrl+Alt+Space | Shift+Cmd+Space |
+| Remote hosts | Linux or macOS over ssh + tmux, Windows over ssh + psmux | same |
+
+The config has the same shape on both, so a Windows PC and a Mac can watch each other's agents. The optional [server](#server-web-and-phone-experimental) (phone view, agents messaging each other) runs on any Linux or macOS machine with Node.
 
 ## Setup
+
+### Windows
 
 Needs Node 18+, [just](https://github.com/casey/just), Windows Terminal, [psmux](https://github.com/marlocarlo/psmux) (`winget install marlocarlo.psmux`) for local panes, and ssh key auth to any remote hosts.
 
@@ -51,7 +67,7 @@ macOS asks once for each of these: **Automation** (Ghostty and Terminal, to swit
 
 ### First run
 
-On first run it writes `config.json` (to `%APPDATA%\openone` for an installed copy). psmux is turned on if it's installed, and every host in `~/.ssh/config` is added but turned off. Set `"enabled": true` on the ones you want, make each `wtTab` regex match that host's Windows Terminal tab title, then choose **Reload config** from the tray. See `config.example.json` for the shape.
+On first run it writes `config.json` (for an installed copy: `%APPDATA%\openone` on Windows, `~/Library/Application Support/openone` on macOS). The local multiplexer (psmux on Windows, tmux on macOS) is turned on if it's installed, and every host in `~/.ssh/config` is added but turned off. Set `"enabled": true` on the ones you want, make each `wtTab` regex match that host's terminal tab title, then choose **Reload config** from the tray. See `config.example.json` for the shape.
 
 **Ctrl+Alt+Space** opens the panel on the agent list, with the most urgent agent selected. **j**/**k** (or the arrow keys) move, **Enter** jumps to the pane, **Tab** switches to the inbox of waiting and finished agents, **r** replies, **1**–**9** answer a question and **Esc** closes. **/** searches agents by name, host or words from their conversation; arrows or Ctrl+j/k pick a match and **Enter** jumps to it. Set `hotkey` in the config to change the shortcut. The tray menu has mute, start at login and config.
 

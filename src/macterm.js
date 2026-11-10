@@ -172,8 +172,10 @@ end run`;
 
 const hasGhostty = () => ['/Applications', path.join(os.homedir(), 'Applications')].some((d) => fs.existsSync(path.join(d, 'Ghostty.app')));
 
-// Ghostty runs a command without your login shell's PATH, where Homebrew's tmux is
-const inLoginShell = (line) => commandLine([os.userInfo().shell || '/bin/zsh', '-lc', line]);
+// Ghostty runs a command without your login shell's PATH, where Homebrew's tmux is. Over ssh
+// it also needs a TERM the other end knows: tmux won't start on xterm-ghostty without its
+// terminfo there.
+const inLoginShell = (line) => commandLine([os.userInfo().shell || '/bin/zsh', '-lc', /^ssh /.test(line) ? `TERM=xterm-256color ${line}` : line]);
 
 const GHOSTTY = { name: 'Ghostty', list: GHOSTTY_LIST, focus: GHOSTTY_FOCUS, byTty: GHOSTTY_BY_TTY, byLabel: GHOSTTY_BY_LABEL, ttys: GHOSTTY_TTYS, open: GHOSTTY_OPEN, line: inLoginShell };
 const TERMINAL = { name: 'Terminal', list: TERMINAL_LIST, focus: TERMINAL_FOCUS, byTty: TERMINAL_FOCUS_BY('tty'), byLabel: TERMINAL_FOCUS_BY('custom title'), ttys: TERMINAL_TTYS, open: TERMINAL_OPEN, line: (l) => l };

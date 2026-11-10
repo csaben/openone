@@ -296,7 +296,7 @@ const tabPattern = (hc) => [hc.wtTab, `^${reEscape(hc.name)}$`].filter(Boolean).
 // attached to the host, or its tab can't be found, opens a new tab attached to the pane's
 // session instead, so nothing has to be opened and attached by hand first.
 async function showPane(h, pane) {
-  const ttys = MAC && h.cfg.type === 'tmux' ? await wt.ttys() : null;
+  const ttys = MAC && h.cfg.type === 'tmux' ? await wt.ttys() : h.src.cfg.ownClient ? await h.src.ownTtys().catch(() => null) : null;
   const attached = pane ? await h.src.focus(pane, ttys).catch(() => true) : true;
   if (attached) {
     const res = await wt.focus(tabPattern(h.cfg), h.cfg.wtTabIndex, pane ? await paneTty(h, pane.session, ttys) : '', h.cfg.name);

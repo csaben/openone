@@ -183,8 +183,8 @@ function parseClients(out) {
       const a = l.match(/\[activity=(\d+)s ago\]/);
       return { name: m[1], session: m[2], control: /\(control mode\)/.test(l), recent: a ? Number(a[1]) : 0 };
     }
-    m = l.trim().match(/^(\S+) (\S+) ([01]) (\d+)(?: (\S+))?$/);
-    if (m) return { name: m[1], session: m[2], control: m[3] === '1', recent: now - Number(m[4]), flags: m[5] || '' };
+    m = l.trim().match(/^(\S+) (\S+) ([01]) (\d+)$/);
+    if (m) return { name: m[1], session: m[2], control: m[3] === '1', recent: now - Number(m[4]) };
     return null;
   }).filter(Boolean);
 }

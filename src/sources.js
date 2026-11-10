@@ -65,7 +65,8 @@ function hexChunks(s, size = 120) {
 }
 
 // "ownClient": jumps only move the tmux clients this computer opened, marked with this harmless
-// attach flag, so a terminal attached from another computer stays where it is
+// attach flag, so a terminal attached from another computer stays where it is. It's read back
+// from ps, as tmux only lists it in client_flags in newer versions.
 const OWN_CLIENT = 'no-detach-on-destroy';
 
 class TmuxSource {
@@ -104,7 +105,7 @@ class TmuxSource {
   // session_attached counts control clients, so streamed sessions would all look attached.
   async realClients(maxAgeMs = 5000) {
     if (!this.clients || Date.now() - this.clients.at > maxAgeMs) {
-      const [out] = await this.batch([['list-clients', '-F', '#{client_name} #{session_name} #{client_control_mode} #{client_activity} #{client_flags}']]);
+      const [out] = await this.batch([['list-clients', '-F', '#{client_name} #{session_name} #{client_control_mode} #{client_activity}']]);
       this.clients = { at: Date.now(), list: parseClients(out).filter((c) => !c.control) };
     }
     return this.clients.list;
@@ -205,7 +206,7 @@ class TmuxSource {
   // computer, leaving alone a client attached from elsewhere.
   async focus(p, ttys) {
     const cmds = [];
-    const clients = (await this.realClients(0).catch(() => [])).filter((c) => (!this.cfg.ownClient || c.flags.includes(OWN_CLIENT)) && (!ttys || ttys.has(c.name))).sort((a, b) => a.recent - b.recent);
+    const clients = (await this.realClients(0).catch(() => [])).filter((c) => !ttys || ttys.has(c.name)).sort((a, b) => a.recent - b.recent);
     if (clients.length && !clients.some((c) => c.session === p.session)) {
       // move the most recently used terminal (never a control client) onto this pane's session
       cmds.push(['switch-client', '-c', clients[0].name, '-t', p.session]);
@@ -575,6 +576,12 @@ class SshTmuxSource extends ShellSource {
   get pathPrefix() { return this.cfg.path ? `export PATH=${this.cfg.path}:"$PATH"; ` : ''; }
 
   get remoteShell() { return `${this.pathPrefix}exec bash --norc --noprofile`; }
+
+  // the ttys of the clients this computer opened
+  async ownTtys() {
+    const out = await this.exec([`ps -axo tty=,command= | grep -F 'attach -f ${OWN_CLIENT}'`]);
+    return new Set(out.split('\n').map((l) => l.trim().split(/\s+/)[0]).filter((t) => /^(pts\/\d+|tty\w+)$/.test(t)).map((t) => `/dev/${t}`));
+  }
 
   get homeCommand() { return 'echo "$HOME"'; }
 

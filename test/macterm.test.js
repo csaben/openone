@@ -54,6 +54,7 @@ test('macterm: Ghostty ids stay text, and its commands get a login shell', () =>
   const [t] = parseTabs(row('7F9C-BD3B', 1, 'true', 'true', 'true', '/dev/ttys004', '', 'tmux tmux'));
   assert.equal(t.target, '7F9C-BD3B');
   assert.match(inLoginShell("tmux attach -t 'a b'"), / -lc 'tmux attach -t '\\''a b'\\'''$/);
+  assert.match(inLoginShell('ssh -t cradle tmux attach'), / -lc 'TERM=xterm-256color ssh -t cradle tmux attach'$/);
 });
 
 // a fake osascript: answers by which script it was handed

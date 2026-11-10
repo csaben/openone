@@ -78,16 +78,11 @@ test('a new terminal tab attaches to the session, over ssh for remote hosts', ()
   assert.deepStrictEqual(mac.attachArgv('work'), ['ssh', '-t', 'me@mac', 'env', 'PATH=/opt/homebrew/bin:$PATH', 'tmux', 'attach', '-t', "'work'"]);
 });
 
-test('ownClient: a jump moves only the client this computer opened', async () => {
+test('ownClient: clients this computer opened are marked, and found again through ps', async () => {
   const src = createSource({ type: 'ssh', ssh: 'x', ownClient: true });
   assert.deepStrictEqual(src.attachArgv('main').slice(3), ['tmux', 'attach', '-f', 'no-detach-on-destroy', '-t', "'main'"]);
-  const sent = [];
-  src.batch = async (cmds) => { sent.push(...cmds); return cmds.map(() => ''); };
-  src.realClients = async () => [{ name: '/dev/pts/1', session: 'a', recent: 0, flags: 'attached,focused' }, { name: '/dev/pts/2', session: 'b', recent: 9, flags: 'attached,no-detach-on-destroy' }];
-  assert.equal(await src.focus({ session: 'c', windowIndex: '0', paneId: '%1' }), true);
-  assert.deepStrictEqual(sent[0], ['switch-client', '-c', '/dev/pts/2', '-t', 'c']);
-  src.realClients = async () => [{ name: '/dev/pts/1', session: 'a', recent: 0, flags: 'attached' }];
-  assert.equal(await src.focus({ session: 'a', windowIndex: '0', paneId: '%1' }), false);
+  src.exec = async () => 'pts/5 tmux attach -f no-detach-on-destroy -t trident\n?? grep -F attach -f no-detach-on-destroy\nttys001 tmux attach -f no-detach-on-destroy\n';
+  assert.deepStrictEqual([...await src.ownTtys()], ['/dev/pts/5', '/dev/ttys001']);
 });
 
 test('focus: a client attached from elsewhere is left alone', async () => {
