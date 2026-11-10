@@ -45,6 +45,7 @@
     },
     "mac": {
       "target": "dmg",
+      "identity": "-",
       "icon": "assets/app-512.png",
       "category": "public.app-category.developer-tools",
       "hardenedRuntime": false,
