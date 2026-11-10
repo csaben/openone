@@ -24,9 +24,7 @@ async function reply(src, p, text) {
     await src.keys(p, ['Escape']);
     await sleep(350);
   } else if (p.kind === 'claude') {
-    // one Ctrl+C clears any half-typed draft; a single press never exits Claude Code
-    await src.keys(p, ['C-c']);
-    await sleep(150);
+    await clearDraft(src, p);
   }
   await src.text(p, text);
   await sleep(60);
@@ -47,16 +45,42 @@ async function confirmSent(src, p, text, tries = 2) {
   }
 }
 
-// The input box is the text between the last two horizontal rules on screen.
-function stillTyped(screen, text) {
+// Ctrl+C clears a half-typed draft, but on an EMPTY box it does something else: with
+// background agents running it kills them all, otherwise it arms "press again to exit".
+// An empty box can still show text (a "Try ..." placeholder or a suggested next prompt,
+// which look like a draft once the colours are gone), so type one marker character and
+// look: alone in the box means it was empty, so take it back with Backspace; after other
+// text means a real draft, and Ctrl+C clears both. Can't read the box: only Backspace.
+const MARK = '~';
+async function clearDraft(src, p) {
+  await src.text(p, MARK);
+  await sleep(250);
+  let box = null;
+  try { box = inputBox(await src.screen(p, 60)); } catch {}
+  await src.keys(p, [box !== null && hasDraft(box) ? 'C-c' : 'BSpace']);
+  await sleep(150);
+}
+
+// box text (no spaces, prompt sign dropped) with the marker typed: a draft if more than the
+// marker is there. One stray character is allowed: psmux sometimes leaves a stale glyph.
+const hasDraft = (box) => !new RegExp(`^.?${MARK}$`, 'u').test(box);
+
+// The input box is the text between the last two horizontal rules on screen, without
+// spaces and without the prompt sign; null when there's no box on screen.
+function inputBox(screen) {
   const lines = String(screen || '').split('\n');
   const rules = lines.map((l, i) => (/^\s*─{10,}\s*$/.test(l) ? i : -1)).filter((i) => i >= 0);
-  if (rules.length < 2) return false;
-  const box = lines.slice(rules[rules.length - 2] + 1, rules[rules.length - 1]).join('').replace(/\s+/g, '');
+  if (rules.length < 2) return null;
+  return lines.slice(rules[rules.length - 2] + 1, rules[rules.length - 1]).join('').replace(/\s+/g, '').replace(/^[❯>]/, '');
+}
+
+function stillTyped(screen, text) {
+  const box = inputBox(screen);
+  if (box === null) return false;
   if (/\[Pastedtext/.test(box)) return true;
   const flat = String(text).replace(/\s+/g, '');
   const head = flat.slice(0, 24), tail = flat.slice(-24);
   return Boolean(flat) && (box.includes(head) || box.includes(tail));
 }
 
-module.exports = { answer, reply, target, stillTyped };
+module.exports = { answer, reply, target, stillTyped, inputBox, hasDraft };

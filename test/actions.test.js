@@ -21,3 +21,26 @@ test('an empty input box means it was sent, even with the message above it', () 
 test('a screen without the input box is left alone', () => {
   assert.ok(!stillTyped('PS D:\\Code> ', msg));
 });
+
+test('reply never presses Ctrl+C on an empty box (it kills background agents)', async () => {
+  const { reply } = require('../src/actions');
+  for (const [shown, draft] of [['❯ Try "fix typecheck errors"', false], ['❯ yeah post it', true]]) {
+    const sent = [];
+    let box = shown;
+    const src = {
+      text: async (_p, t) => { sent.push(`text ${t}`); box = t === '~' && !draft ? '❯ ~' : `${box}${t}`; },
+      keys: async (_p, k) => { sent.push(`keys ${k.join(' ')}`); if (k[0] === 'C-c' || k[0] === 'Enter') box = '❯ '; },
+      screen: async () => screen([box]),
+    };
+    await reply(src, { kind: 'claude', state: 'idle' }, 'hello');
+    assert.deepStrictEqual(sent.slice(0, 2), ['text ~', draft ? 'keys C-c' : 'keys BSpace']);
+    assert.ok(!sent.slice(2).includes('keys C-c'));
+  }
+});
+
+test('the marker alone, even after a stale glyph, is an empty box', () => {
+  const { inputBox, hasDraft } = require('../src/actions');
+  assert.ok(!hasDraft(inputBox(screen(['❯ ~']))));
+  assert.ok(!hasDraft(inputBox(screen(['❯f~']))));
+  assert.ok(hasDraft(inputBox(screen(['❯ draft here~']))));
+});
