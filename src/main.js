@@ -963,6 +963,34 @@ async function shotNow() {
 }
 
 ipcMain.handle('shot:grab', () => grabScreen().catch(() => null));
+
+// every screen, left to right, each as its own picture; the one under the mouse is current
+async function grabScreens() {
+  const shown = win && !win.isDestroyed() && win.isVisible();
+  if (shown) { win.setOpacity(0); await sleep(120); }
+  try {
+    const ds = screen.getAllDisplays().sort((a, b) => a.bounds.x - b.bounds.x || a.bounds.y - b.bounds.y);
+    const here = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+    const size = {
+      width: Math.max(...ds.map((d) => Math.round(d.bounds.width * d.scaleFactor))),
+      height: Math.max(...ds.map((d) => Math.round(d.bounds.height * d.scaleFactor))),
+    };
+    const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: size });
+    fs.mkdirSync(SHOTS, { recursive: true });
+    const now = Date.now();
+    const out = [];
+    ds.forEach((d, i) => {
+      const src = sources.find((x) => x.display_id === String(d.id)) || (ds.length === 1 ? sources[0] : null);
+      if (!src || src.thumbnail.isEmpty()) return;
+      const file = path.join(SHOTS, `${now}-${i + 1}.png`);
+      fs.writeFileSync(file, src.thumbnail.toPNG());
+      out.push({ file, label: `Screen ${i + 1}${d.id === screen.getPrimaryDisplay().id ? ' (main)' : ''}`, current: d.id === here.id });
+    });
+    for (const old of fs.readdirSync(SHOTS).sort().slice(0, -30)) fs.rmSync(path.join(SHOTS, old), { force: true });
+    return out;
+  } finally { if (shown) win.setOpacity(1); }
+}
+ipcMain.handle('shot:grab-all', () => grabScreens().catch(() => []));
 // the picture, for the panel to show and draw on; and the marked-up copy it hands back
 const inShots = (file) => typeof file === 'string' && path.dirname(path.resolve(file)) === path.resolve(SHOTS);
 ipcMain.handle('shot:image', (_e, file) => (inShots(file) && fs.existsSync(file) ? `data:image/png;base64,${fs.readFileSync(file).toString('base64')}` : null));

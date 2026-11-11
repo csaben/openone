@@ -507,20 +507,42 @@ async function openShot() {
   }
   const list = shotChoices();
   view = 'shot';
-  const s = { text: '', sel: Math.max(0, list.findIndex((p) => p.key === S.shot.key)), pic: window.oo.shotGrab(), busy: '', img: null, strokes: [] };
+  // every screen is taken; the one under the mouse is shown first, ← → switch. What you
+  // draw is kept per screen, and the screen showing when you send is the one that goes.
+  const all = !!(window.oo.shotGrabAll && window.oo.shotImage);
+  const s = {
+    text: '', sel: Math.max(0, list.findIndex((p) => p.key === S.shot.key)), busy: '',
+    screens: [], cur: 0,
+    pic: all ? null : window.oo.shotGrab(),
+    get scr() { return this.screens[this.cur] || null; },
+    get img() { return this.scr && this.scr.img; },
+    get strokes() { return this.scr ? this.scr.strokes : []; },
+    set strokes(v) { if (this.scr) this.scr.strokes = v; },
+  };
   shot = s;
   sig = '';
   render();
   const i = $('#sn');
   if (i) i.focus();
-  // the preview you can circle things on (optional: nothing drawn sends the plain picture)
-  if (!window.oo.shotImage) return;
-  const file = await s.pic;
-  const url = file ? await window.oo.shotImage(file).catch(() => null) : null;
-  if (!url || shot !== s) return;
-  const img = new Image();
-  img.onload = () => { if (shot !== s) return; s.img = img; sig = ''; render(); };
-  img.src = url;
+  if (!all) return;
+  const grabbed = await window.oo.shotGrabAll().catch(() => []);
+  if (shot !== s) return;
+  s.screens = grabbed.map((g) => ({ ...g, img: null, strokes: [] }));
+  s.cur = Math.max(0, s.screens.findIndex((g) => g.current));
+  sig = ''; render();
+  for (const g of s.screens) {
+    const url = await window.oo.shotImage(g.file).catch(() => null);
+    if (!url || shot !== s) continue;
+    const img = new Image();
+    img.onload = () => { if (shot !== s) return; g.img = img; sig = ''; render(); };
+    img.src = url;
+  }
+}
+function shotScreen(d) {
+  const n = shot && shot.screens.length;
+  if (!n || n < 2) return;
+  shot.cur = (shot.cur + d + n) % n;
+  sig = ''; render();
 }
 
 // ---- marking up the screenshot: drag on the preview to draw, in red ----
@@ -592,13 +614,16 @@ function shotCard() {
       <div class="t2">${esc(p.title || p.summary || subline(p))}</div></div>
       <span class="age">${esc(when(p))}</span></div>`).join('') || '<div class="empty">No agents running</div>';
   const n = shot.strokes.length;
+  const many = shot.screens.length > 1;
+  const nav = many ? `<button class="pill" data-shot-prev title="Previous screen (←)">‹</button><span class="shotname">${esc(shot.scr.label)} · ${shot.cur + 1}/${shot.screens.length}</span><button class="pill" data-shot-next title="Next screen (→)">›</button><span class="shotsp"></span>` : '';
   const pv = shot.img ? `<div class="shotpv"><canvas id="shotcv" style="aspect-ratio:${shot.img.naturalWidth}/${shot.img.naturalHeight}" title="Drag to circle what you mean"></canvas>
-      <div class="shotbar">${n ? `${n} mark${n > 1 ? 's' : ''} · <button class="pill" data-shot-undo>Undo</button> <button class="pill" data-shot-clear>Clear</button>` : 'Drag on the picture to circle what you mean (optional)'}</div></div>` : '';
+      <div class="shotbar">${nav}${n ? `${n} mark${n > 1 ? 's' : ''} <button class="pill" data-shot-undo>Undo</button> <button class="pill" data-shot-clear>Clear</button>` : `<span>Drag to circle what you mean${many ? '' : ' (optional)'}</span>`}</div></div>`
+    : shot.scr ? '<div class="shotpv"><div class="empty">Loading the picture…</div></div>' : '';
   const html = `<div class="head"><h1>Send your screen</h1><button class="x" data-close>${X}</button></div>
     ${pv}
     <div class="reply"><input id="sn" placeholder="What should they look at? (optional)" spellcheck="false" autocomplete="off" value="${esc(shot.text)}"><button data-shot-send title="Send">${SEND}</button></div>
     ${shot.busy ? `<div class="empty">${esc(shot.busy)}</div>` : ''}${rows}`;
-  return { html, hint: `<kbd>↑</kbd><kbd>↓</kbd> pick · drag to circle${n ? ' · <kbd>Ctrl</kbd><kbd>Z</kbd> undo' : ''} · <kbd>Enter</kbd> send · <kbd>Esc</kbd> back` };
+  return { html, hint: `<kbd>↑</kbd><kbd>↓</kbd> pick${many ? ' · <kbd>←</kbd><kbd>→</kbd> screen' : ''} · drag to circle${n ? ' · <kbd>Ctrl</kbd><kbd>Z</kbd> undo' : ''} · <kbd>Enter</kbd> send · <kbd>Esc</kbd> back` };
 }
 async function sendShot() {
   const p = shotChoices()[shot.sel];
@@ -608,7 +633,8 @@ async function sendShot() {
   shot.busy = 'Sending…'; sig = ''; render();
   try {
     const marked = await markedShot().catch(() => null);
-    const to = await window.oo.shotSend({ key: p.key, text: shot.text, shot: marked || await shot.pic, marked: !!marked });
+    const plain = shot.scr ? shot.scr.file : await shot.pic;
+    const to = await window.oo.shotSend({ key: p.key, text: shot.text, shot: marked || plain, marked: !!marked });
     toast(`Sent your screen to ${to}`);
     shot = null; view = 'agents'; sig = '';
     collapse();
@@ -622,6 +648,10 @@ function shotKey(e) {
   else if (e.key === 'Enter') { e.preventDefault(); sendShot(); }
   else if (e.key === 'Escape') { e.preventDefault(); closeShot(); }
   else if ((e.ctrlKey || e.metaKey) && e.key === 'z' && shot.strokes.length) { e.preventDefault(); shot.strokes.pop(); sig = ''; render(); }
+  // ← → switch screens while the box is empty (with text in it they move the caret; Alt+← → always switch)
+  else if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && shot.screens.length > 1 && (e.altKey || !e.target.value)) {
+    e.preventDefault(); shotScreen(e.key === 'ArrowLeft' ? -1 : 1);
+  }
 }
 document.addEventListener('input', (e) => { if (e.target.id === 'sn' && shot) shot.text = e.target.value; });
 
@@ -1141,7 +1171,7 @@ $('#b-term').addEventListener('click', () => {
 });
 
 body.addEventListener('click', (e) => {
-  const t = e.target.closest('[data-setting],[data-target],[data-close],[data-jump],[data-n],[data-send],[data-cur],[data-proj],[data-row],[data-start],[data-code],[data-ask],[data-sleep],[data-wake],[data-forget],[data-pick],[data-tidy],[data-tidy-go],[data-tidy-x],[data-learn],[data-shot-to],[data-shot-send],[data-shot-undo],[data-shot-clear]');
+  const t = e.target.closest('[data-setting],[data-target],[data-close],[data-jump],[data-n],[data-send],[data-cur],[data-proj],[data-row],[data-start],[data-code],[data-ask],[data-sleep],[data-wake],[data-forget],[data-pick],[data-tidy],[data-tidy-go],[data-tidy-x],[data-learn],[data-shot-to],[data-shot-send],[data-shot-undo],[data-shot-clear],[data-shot-prev],[data-shot-next]');
   if (!t) return;
   if (t.dataset.setting) { sk = settingRows().findIndex((r) => r.id === t.dataset.setting); if (!stEdit || t.dataset.setting !== 'stt') changeSetting(t.dataset.setting); return; }
   if (t.dataset.target !== undefined) { chooseTarget(t.dataset.target); return; }
@@ -1168,6 +1198,7 @@ body.addEventListener('click', (e) => {
   else if (t.dataset.learn !== undefined) sendLearn();
   else if (t.dataset.shotTo !== undefined) { shot.sel = Number(t.dataset.shotTo); render(); const i = $('#sn'); if (i) i.focus(); }
   else if (t.dataset.shotSend !== undefined) sendShot();
+  else if (t.dataset.shotPrev !== undefined || t.dataset.shotNext !== undefined) { shotScreen(t.dataset.shotPrev !== undefined ? -1 : 1); const i = $('#sn'); if (i) i.focus(); }
   else if (t.dataset.shotUndo !== undefined) { shot.strokes.pop(); sig = ''; render(); const i = $('#sn'); if (i) i.focus(); }
   else if (t.dataset.shotClear !== undefined) { shot.strokes = []; sig = ''; render(); const i = $('#sn'); if (i) i.focus(); }
   else if (t.dataset.cur) { cur = t.dataset.cur; render(); }

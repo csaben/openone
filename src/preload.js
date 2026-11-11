@@ -30,6 +30,7 @@ contextBridge.exposeInMainWorld('oo', {
   shotGrab: () => ipcRenderer.invoke('shot:grab'),
   shotSend: (m) => ipcRenderer.invoke('shot:send', m),
   shotImage: (file) => ipcRenderer.invoke('shot:image', file),
+  shotGrabAll: () => ipcRenderer.invoke('shot:grab-all'),
   shotMarked: (dataUrl) => ipcRenderer.invoke('shot:marked', dataUrl),
   shotNow: () => ipcRenderer.invoke('shot:now'),
   shotSet: (patch) => ipcRenderer.invoke('shot:set', patch),
