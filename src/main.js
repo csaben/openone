@@ -942,12 +942,14 @@ async function fileAnswer(h, key) {
   }).catch(() => {});
 }
 
-async function sendShot({ key, text, shot }) {
+async function sendShot({ key, text, shot, marked }) {
   const r = lookup(key);
   if (!r) throw new Error("that agent isn't running");
+  if (shot && !inShots(shot)) shot = null;
   const local = !/^ssh/.test(r.h.cfg.type || '');
   const at = shot ? (local ? shot : await copyShot(r.h, shot)) : '';
-  const ask = String(text || '').trim() || "Here's my screen. What do you make of it?";
+  let ask = String(text || '').trim() || (marked ? "Here's my screen. What do you make of what I marked?" : "Here's my screen. What do you make of it?");
+  if (marked && at) ask += ' (The red marks on the picture are mine: they show what I mean.)';
   if (shot && scfg().plastic !== false) toPlastic(shot, String(text || '').trim(), `${r.p.label} · ${r.p.host}`, key);
   await reply(key, `[screen, from the hotkey] ${ask}${at ? `\n(their screen when they asked: ${at})` : shot ? '\n(a picture of their screen was taken but could not be copied to this host)' : ''}`);
   return r.p.label;
@@ -961,6 +963,17 @@ async function shotNow() {
 }
 
 ipcMain.handle('shot:grab', () => grabScreen().catch(() => null));
+// the picture, for the panel to show and draw on; and the marked-up copy it hands back
+const inShots = (file) => typeof file === 'string' && path.dirname(path.resolve(file)) === path.resolve(SHOTS);
+ipcMain.handle('shot:image', (_e, file) => (inShots(file) && fs.existsSync(file) ? `data:image/png;base64,${fs.readFileSync(file).toString('base64')}` : null));
+ipcMain.handle('shot:marked', (_e, dataUrl) => {
+  const m = /^data:image\/png;base64,(.+)$/.exec(String(dataUrl || ''));
+  if (!m) throw new Error('not a picture');
+  fs.mkdirSync(SHOTS, { recursive: true });
+  const file = path.join(SHOTS, `${Date.now()}-marked.png`);
+  fs.writeFileSync(file, Buffer.from(m[1], 'base64'));
+  return file;
+});
 ipcMain.handle('shot:send', (_e, m) => sendShot(m || {}));
 ipcMain.handle('shot:now', () => shotNow());
 ipcMain.handle('shot:set', (_e, patch) => {

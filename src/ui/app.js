@@ -507,11 +507,80 @@ async function openShot() {
   }
   const list = shotChoices();
   view = 'shot';
-  shot = { text: '', sel: Math.max(0, list.findIndex((p) => p.key === S.shot.key)), pic: window.oo.shotGrab(), busy: '' };
+  const s = { text: '', sel: Math.max(0, list.findIndex((p) => p.key === S.shot.key)), pic: window.oo.shotGrab(), busy: '', img: null, strokes: [] };
+  shot = s;
   sig = '';
   render();
   const i = $('#sn');
   if (i) i.focus();
+  // the preview you can circle things on (optional: nothing drawn sends the plain picture)
+  if (!window.oo.shotImage) return;
+  const file = await s.pic;
+  const url = file ? await window.oo.shotImage(file).catch(() => null) : null;
+  if (!url || shot !== s) return;
+  const img = new Image();
+  img.onload = () => { if (shot !== s) return; s.img = img; sig = ''; render(); };
+  img.src = url;
+}
+
+// ---- marking up the screenshot: drag on the preview to draw, in red ----
+// Strokes are kept in picture pixels, so they survive the card being rebuilt and land on
+// the full-size picture where you drew them.
+let pen = null; // the stroke being drawn: [[x, y], ...] in picture pixels
+const PEN_W = (img) => Math.max(4, Math.round(img.naturalWidth / 320));
+function strokePath(ctx, pts, k) {
+  ctx.beginPath();
+  pts.forEach(([x, y], i) => (i ? ctx.lineTo(x * k, y * k) : ctx.moveTo(x * k, y * k)));
+  if (pts.length === 1) ctx.lineTo(pts[0][0] * k + 0.1, pts[0][1] * k);
+  ctx.stroke();
+}
+function inkStyle(ctx, w) { ctx.strokeStyle = '#ff2d2d'; ctx.lineWidth = w; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; }
+function paintShot() {
+  const cv = $('#shotcv');
+  if (!cv || !shot || !shot.img) return;
+  const r = cv.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  cv.width = Math.round(r.width * dpr);
+  cv.height = Math.round(r.height * dpr);
+  const ctx = cv.getContext('2d');
+  const k = cv.width / shot.img.naturalWidth;
+  ctx.drawImage(shot.img, 0, 0, cv.width, cv.height);
+  inkStyle(ctx, PEN_W(shot.img) * k);
+  for (const s of [...shot.strokes, ...(pen ? [pen] : [])]) strokePath(ctx, s, k);
+}
+function picPoint(e) {
+  const cv = $('#shotcv');
+  const r = cv.getBoundingClientRect();
+  return [(e.clientX - r.left) / r.width * shot.img.naturalWidth, (e.clientY - r.top) / r.height * shot.img.naturalHeight];
+}
+document.addEventListener('pointerdown', (e) => {
+  if (e.target.id !== 'shotcv' || !shot || !shot.img || e.button !== 0) return;
+  e.preventDefault();
+  pen = [picPoint(e)];
+  paintShot();
+});
+document.addEventListener('pointermove', (e) => {
+  if (!pen || !shot || !$('#shotcv')) return;
+  pen.push(picPoint(e));
+  paintShot();
+});
+document.addEventListener('pointerup', () => {
+  if (!pen) return;
+  if (shot) { shot.strokes.push(pen); sig = ''; }
+  pen = null;
+  if (shot) { render(); const i = $('#sn'); if (i) i.focus(); }
+});
+// the full-size picture with the marks on it -> its file, or null when nothing was drawn
+async function markedShot() {
+  if (!shot || !shot.img || !shot.strokes.length || !window.oo.shotMarked) return null;
+  const c = document.createElement('canvas');
+  c.width = shot.img.naturalWidth;
+  c.height = shot.img.naturalHeight;
+  const ctx = c.getContext('2d');
+  ctx.drawImage(shot.img, 0, 0);
+  inkStyle(ctx, PEN_W(shot.img));
+  for (const s of shot.strokes) strokePath(ctx, s, 1);
+  return window.oo.shotMarked(c.toDataURL('image/png'));
 }
 function closeShot() { shot = null; view = 'agents'; sig = ''; if (document.activeElement) document.activeElement.blur(); render(); selectTop(); }
 function shotCard() {
@@ -522,10 +591,14 @@ function shotCard() {
       <div class="mid"><div class="t1"><span class="nm">${esc(p.label)}</span><span class="kind">${esc(p.kind)} · ${esc(p.host)}</span></div>
       <div class="t2">${esc(p.title || p.summary || subline(p))}</div></div>
       <span class="age">${esc(when(p))}</span></div>`).join('') || '<div class="empty">No agents running</div>';
+  const n = shot.strokes.length;
+  const pv = shot.img ? `<div class="shotpv"><canvas id="shotcv" style="aspect-ratio:${shot.img.naturalWidth}/${shot.img.naturalHeight}" title="Drag to circle what you mean"></canvas>
+      <div class="shotbar">${n ? `${n} mark${n > 1 ? 's' : ''} · <button class="pill" data-shot-undo>Undo</button> <button class="pill" data-shot-clear>Clear</button>` : 'Drag on the picture to circle what you mean (optional)'}</div></div>` : '';
   const html = `<div class="head"><h1>Send your screen</h1><button class="x" data-close>${X}</button></div>
+    ${pv}
     <div class="reply"><input id="sn" placeholder="What should they look at? (optional)" spellcheck="false" autocomplete="off" value="${esc(shot.text)}"><button data-shot-send title="Send">${SEND}</button></div>
     ${shot.busy ? `<div class="empty">${esc(shot.busy)}</div>` : ''}${rows}`;
-  return { html, hint: '<kbd>↑</kbd><kbd>↓</kbd> pick · <kbd>Enter</kbd> send · <kbd>Esc</kbd> back' };
+  return { html, hint: `<kbd>↑</kbd><kbd>↓</kbd> pick · drag to circle${n ? ' · <kbd>Ctrl</kbd><kbd>Z</kbd> undo' : ''} · <kbd>Enter</kbd> send · <kbd>Esc</kbd> back` };
 }
 async function sendShot() {
   const p = shotChoices()[shot.sel];
@@ -534,7 +607,8 @@ async function sendShot() {
   shot.text = i ? i.value : shot.text;
   shot.busy = 'Sending…'; sig = ''; render();
   try {
-    const to = await window.oo.shotSend({ key: p.key, text: shot.text, shot: await shot.pic });
+    const marked = await markedShot().catch(() => null);
+    const to = await window.oo.shotSend({ key: p.key, text: shot.text, shot: marked || await shot.pic, marked: !!marked });
     toast(`Sent your screen to ${to}`);
     shot = null; view = 'agents'; sig = '';
     collapse();
@@ -547,6 +621,7 @@ function shotKey(e) {
   if ((down || up) && n) { e.preventDefault(); shot.sel = (shot.sel + (down ? 1 : -1) + n) % n; render(); reveal(); }
   else if (e.key === 'Enter') { e.preventDefault(); sendShot(); }
   else if (e.key === 'Escape') { e.preventDefault(); closeShot(); }
+  else if ((e.ctrlKey || e.metaKey) && e.key === 'z' && shot.strokes.length) { e.preventDefault(); shot.strokes.pop(); sig = ''; render(); }
 }
 document.addEventListener('input', (e) => { if (e.target.id === 'sn' && shot) shot.text = e.target.value; });
 
@@ -856,6 +931,7 @@ function render() {
     const top = body.scrollTop;
     body.innerHTML = html;
     body.scrollTop = top;
+    if (shooting) paintShot();
     if ($('#hint').dataset.text !== hint) { $('#hint').innerHTML = `<span>${hint}</span>`; $('#hint').dataset.text = hint; showHint(!!hint); }
     sig = next;
     const el = focused && document.getElementById(focused);
@@ -1065,7 +1141,7 @@ $('#b-term').addEventListener('click', () => {
 });
 
 body.addEventListener('click', (e) => {
-  const t = e.target.closest('[data-setting],[data-target],[data-close],[data-jump],[data-n],[data-send],[data-cur],[data-proj],[data-row],[data-start],[data-code],[data-ask],[data-sleep],[data-wake],[data-forget],[data-pick],[data-tidy],[data-tidy-go],[data-tidy-x],[data-learn],[data-shot-to],[data-shot-send]');
+  const t = e.target.closest('[data-setting],[data-target],[data-close],[data-jump],[data-n],[data-send],[data-cur],[data-proj],[data-row],[data-start],[data-code],[data-ask],[data-sleep],[data-wake],[data-forget],[data-pick],[data-tidy],[data-tidy-go],[data-tidy-x],[data-learn],[data-shot-to],[data-shot-send],[data-shot-undo],[data-shot-clear]');
   if (!t) return;
   if (t.dataset.setting) { sk = settingRows().findIndex((r) => r.id === t.dataset.setting); if (!stEdit || t.dataset.setting !== 'stt') changeSetting(t.dataset.setting); return; }
   if (t.dataset.target !== undefined) { chooseTarget(t.dataset.target); return; }
@@ -1092,6 +1168,8 @@ body.addEventListener('click', (e) => {
   else if (t.dataset.learn !== undefined) sendLearn();
   else if (t.dataset.shotTo !== undefined) { shot.sel = Number(t.dataset.shotTo); render(); const i = $('#sn'); if (i) i.focus(); }
   else if (t.dataset.shotSend !== undefined) sendShot();
+  else if (t.dataset.shotUndo !== undefined) { shot.strokes.pop(); sig = ''; render(); const i = $('#sn'); if (i) i.focus(); }
+  else if (t.dataset.shotClear !== undefined) { shot.strokes = []; sig = ''; render(); const i = $('#sn'); if (i) i.focus(); }
   else if (t.dataset.cur) { cur = t.dataset.cur; render(); }
 });
 body.addEventListener('input', (e) => {

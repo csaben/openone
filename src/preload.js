@@ -29,6 +29,8 @@ contextBridge.exposeInMainWorld('oo', {
   // your screen to an agent (main.js "shot")
   shotGrab: () => ipcRenderer.invoke('shot:grab'),
   shotSend: (m) => ipcRenderer.invoke('shot:send', m),
+  shotImage: (file) => ipcRenderer.invoke('shot:image', file),
+  shotMarked: (dataUrl) => ipcRenderer.invoke('shot:marked', dataUrl),
   shotNow: () => ipcRenderer.invoke('shot:now'),
   shotSet: (patch) => ipcRenderer.invoke('shot:set', patch),
   // push-to-talk settings (main.js "voice")
