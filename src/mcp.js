@@ -462,8 +462,10 @@ async function handle(msg) {
   if (method === 'tools/list') return out({ jsonrpc: '2.0', id, result: { tools: TOOLS } });
   if (method === 'tools/call') {
     try {
-      const t = ME.pane ? null : codexThread(params._meta);
-      const who = t ? { ...ME, thread: t.thread, cwd: t.cwd } : ME;
+      // a Codex thread wins over the pane found at startup: one copy of this server serves
+      // every Codex pane, and its parent processes only lead to the first one
+      const t = codexThread(params._meta);
+      const who = t ? { host: ME.host, thread: t.thread, cwd: t.cwd } : ME;
       const r = await run(params.name, params.arguments || {}, who);
       // tools answer with text, or with { content } when there's a picture
       out({ jsonrpc: '2.0', id, result: typeof r === 'string' ? { content: [{ type: 'text', text: r }] } : r });

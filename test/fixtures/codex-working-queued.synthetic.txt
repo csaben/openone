@@ -1,0 +1,25 @@
+• I found a mismatch in the config files: one only lists the first five entries. The full list is in the other one, as the README says, so the
+  loader now uses that too. The model downloads have completed.
+
+• Working (12m 56s • esc to interrupt)
+
+• Queued follow-up inputs
+  ↳ Read the new section in BRIEF.md and fold it into the build; don't start the extra service yourself.
+  ↳ Another addendum in BRIEF.md: a fast gate model that sets check-back timers. Fold it in.
+  ↳ Addendum 3 in BRIEF.md: quality bar for substantive replies, streamed from a persistent pre-warmed process with the full context
+    pack. Fold it in.
+  ↳ Approved: you may stop the two voice services for one ~60-minute load test once deps are ready. Restart both right after, check
+    each /health and confirm they're back in your report.
+  ↳ Addendum 4 in BRIEF.md: a simulated-user sandbox with 7 PASS/FAIL scenarios and recordings. Fold it in.
+  ↳ Addendum 5 in BRIEF.md: hill-climb in rounds (score, change one thing, keep if better) until targets hold 2 rounds or 12 max.
+  ↳ Addendum 6 in BRIEF.md: 5 drill modes and before/after videos per drill. Fold it in.
+  ↳ Addendum 7 in BRIEF.md: match the simulated user's speaking rate and pauses to real transcripts; fall back to a stock voice for
+    turn-taking tests. Addendum 8: after barge-in drop the old thread and follow the user,
+    …
+    shift+← edit last queued message
+
+
+› Ask Codex to do anything
+
+  GPT-6-Astra max · D:\Code\example · Build the duplex voice partner
+  ← for agents · ? for shortcuts                                                                                                                        ⚠ 2 warnings · f2 to view

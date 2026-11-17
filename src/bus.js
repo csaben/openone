@@ -78,8 +78,9 @@ class Bus {
     if (!host) return null;
     const h = String(host).toLowerCase();
     const view = this.monitor.view().filter((p) => p.host.toLowerCase() === h);
-    if (pane) return view.filter((p) => p.paneId === pane).find((p) => !session || p.session === session) || null;
-    if (!thread) return null;
+    // a Codex thread wins over a pane: Codex shares one mcp.js between its panes, so the
+    // pane that copy found at startup is only right for the first of them
+    if (!thread) return pane ? view.filter((p) => p.paneId === pane).find((p) => !session || p.session === session) || null : null;
     const known = this.threads.get(thread);
     if (known) { const p = view.find((x) => x.key === known); if (p) return p; }
     const norm = (s) => String(s || '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();

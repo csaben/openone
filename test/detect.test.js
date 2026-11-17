@@ -69,3 +69,13 @@ test('findMenu stays fast on long, space-padded numbered lines', () => {
   for (let i = 0; i < 20; i++) detect(screen, { command: 'claude' });
   assert.ok(Number(process.hrtime.bigint() - t) / 1e6 < 200, 'took too long');
 });
+
+test('codex: working while queued follow-ups push the status line far up', () => {
+  const text = require('fs').readFileSync(require('path').join(__dirname, 'fixtures/codex-working-queued.synthetic.txt'), 'utf8');
+  assert.equal(detect(text, { command: 'codex-x86_64-pc-windows-msvc' }).state, 'working');
+});
+
+test('codex: the status line typed in the composer is not a working turn', () => {
+  const text = require('fs').readFileSync(require('path').join(__dirname, 'fixtures/codex-idle-queued-text.synthetic.txt'), 'utf8');
+  assert.equal(detect(text, { command: 'codex-x86_64-pc-windows-msvc' }).state, 'idle');
+});

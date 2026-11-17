@@ -121,3 +121,14 @@ test('bus: a Codex caller is the Codex pane in its folder, the working one if se
   assert.equal(bus.whoami({ host: 'b', thread: 't-2', cwd: '/w/app' }).key, 'b|s|%2'); // remembered
   assert.equal(bus.whoami({ host: 'b', thread: 't-3', cwd: '/w/app' }), null); // two idle ones: can't tell
 });
+
+test('whoami: a Codex thread wins over the pane the shared mcp.js started in', () => {
+  const { Bus } = require('../src/bus');
+  const view = [
+    { key: 'i|0|%91', host: 'inari', session: '0', paneId: '%91', label: 'tts-highlight-edit', kind: 'codex', state: 'idle', path: 'D:\Code\tts-highlight-edit' },
+    { key: 'i|0|%133', host: 'inari', session: '0', paneId: '%133', label: 'tyger-duplex', kind: 'codex', state: 'working', path: 'D:\Code\tyger-duplex' },
+  ];
+  const bus = new Bus({ monitor: { view: () => view }, deliver: async () => {} });
+  assert.equal(bus.whoami({ host: 'inari', pane: '%91', session: '0', thread: '0199aaaa-bbbb-cccc-dddd-eeeeffff0000', cwd: 'D:\Code\tyger-duplex' }).key, 'i|0|%133');
+  assert.equal(bus.whoami({ host: 'inari', pane: '%91', session: '0' }).key, 'i|0|%91');
+});

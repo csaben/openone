@@ -125,16 +125,30 @@ function spinning(lines) {
   return false;
 }
 
+// Codex's live status line, anywhere from the composer up: "• Working (3s • esc to interrupt)"
+// (the spinner glyph varies). Searched up to the "› " composer, so queued "↳" lines don't count.
+function codexWorking(lines) {
+  let i = lines.length - 1;
+  for (let k = i; k >= 0 && k >= lines.length - 12; k--) if (/^\s*›\s/.test(lines[k])) { i = k - 1; break; }
+  for (let k = i; k >= 0 && k >= i - 60; k--) {
+    if (/^\s*\S?\s*[A-Z][\w ]*\((?:[^()]*\s)?esc to interrupt\)/.test(lines[k]) && !/^\s*↳/.test(lines[k])) return true;
+  }
+  return false;
+}
+
 function detect(text, meta = {}) {
   const lines = text.replace(/\r/g, '').split('\n');
   while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
   const kind = detectKind(text, meta);
   if (!kind) return { kind: null, state: 'shell' };
-  const footer = lines.slice(-8).join('\n');
+  // (the input box's own line doesn't count: you may have typed the words yourself)
+  const footer = lines.slice(-8).filter((l) => !/^\s*[›❯]\s/.test(l)).join('\n');
   // Older Claude Code (and Codex) print "esc to interrupt"; newer Claude Code only shows
   // the spinner line above the input box: "* Infusing… (10m 58s · ↓ 35k tokens)". A
   // finished turn's line has no "…" ("✻ Brewed for 4s · done 11:20 PM").
-  const working = /esc to interrupt/i.test(footer) || spinning(lines);
+  // Codex prints its status line ("• Working (12m 56s • esc to interrupt)") above the
+  // composer, and with follow-ups queued that block can push it 30+ lines up.
+  const working = /esc to interrupt/i.test(footer) || spinning(lines) || (kind === 'codex' && codexWorking(lines));
   const menu = working ? null : findMenu(lines);
   const waitHint = /esc to cancel|enter to (select|confirm)|do you want to|would you like to/i.test(lines.slice(-30).join('\n'));
   if (menu && (waitHint || menu.options.length)) {
