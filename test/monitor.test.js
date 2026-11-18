@@ -80,3 +80,23 @@ test('monitor: last used is set by state changes and by opening, not by output',
   m.markSeen('h|s|%1');
   assert.ok(m.view()[0].used > 3000);
 });
+
+test('last used survives a restart, and a pane with a new id in the same place keeps it', () => {
+  const os = require('node:os');
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'oo-used-')), 'used.json');
+  const a = new Monitor({ usedFile: file });
+  a.ingest('h', pane(fx('claude-idle-done.txt')));
+  a.markSeen('h|s|%1');
+  const t = a.view()[0].used;
+  assert.ok(t > 0);
+  a.save();
+  const b = new Monitor({ usedFile: file });
+  b.ingest('h', pane(fx('claude-idle-done.txt')));
+  assert.equal(b.view()[0].used, t);
+  const c = new Monitor({ usedFile: file });
+  c.ingest('h', pane(fx('claude-idle-done.txt'), { paneId: '%9' })); // multiplexer restarted
+  assert.equal(c.view()[0].used, t);
+  const d = new Monitor({ usedFile: file });
+  d.ingest('h', pane(fx('claude-idle-done.txt'), { paneId: '%9', path: '/home/a/Code/other' }));
+  assert.equal(d.view()[0].used, 0);
+});

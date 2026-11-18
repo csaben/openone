@@ -260,7 +260,8 @@ function publish(h, raws) {
 function startHosts() {
   for (const h of Object.values(hosts)) { h.running = false; if (h.src.close) h.src.close(); }
   hosts = {};
-  monitor = new Monitor({ hostNames: [require('os').hostname(), ...cfg.hosts.map((h) => h.name)] });
+  if (monitor && monitor.saveTimer) monitor.save();
+  monitor = new Monitor({ hostNames: [require('os').hostname(), ...cfg.hosts.map((h) => h.name)], usedFile: path.join(app.getPath('userData'), 'used.json') });
   for (const hc of cfg.hosts) {
     const h = { cfg: hc, src: createSource({ ownClient: MAC && hc.type === 'ssh', ...hc }), ok: false, error: 'connecting', running: true };
     hosts[hc.name] = h;
@@ -1552,6 +1553,7 @@ function voiceIpc() {
 
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
+  if (monitor && monitor.saveTimer) monitor.save();
   voice.stopHook();
   wt.stop();
   for (const h of Object.values(hosts)) { h.running = false; if (h.src.close) h.src.close(); }

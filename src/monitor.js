@@ -2,8 +2,11 @@
 // A state only counts once it is seen on two polls in a row, so a pane flickering
 // between frames never fires a toast.
 
+const fs = require('fs');
 const path = require('path');
 const { detect } = require('./detect');
+
+const KEEP = 14 * 86400000; // forget when a pane was last used after this long
 
 const GENERIC = /^(claude|codex|node|bash|zsh|sh|fish|pwsh|powershell|cmd|tmux|psmux|trident)([.-].*)?$/i;
 const SPIN = /^[\s✳✻✶✢✽·*⠁-⣿]+/;
@@ -20,9 +23,39 @@ function title(raw, hostNames) {
 }
 
 class Monitor {
-  constructor({ hostNames = [] } = {}) {
+  // usedFile: where "last used" times are kept, so the agent list stays in recent-first
+  // order across restarts (openone's, or the multiplexer's: then panes get new ids, so a
+  // pane also matches on its folder and name)
+  constructor({ hostNames = [], usedFile = null } = {}) {
     this.panes = new Map();
     this.hostNames = new Set(hostNames.map((h) => h.toLowerCase()));
+    this.usedFile = usedFile;
+    this.saved = {};
+    if (usedFile) try { this.saved = JSON.parse(fs.readFileSync(usedFile, 'utf8')) || {}; } catch {}
+    this.saveTimer = null;
+  }
+
+  static place(p) { return `@${p.host}|${String(p.path || '').replace(/\\/g, '/').toLowerCase()}|${p.label}`; }
+
+  remember(p) {
+    if (!this.usedFile || !p.used) return;
+    this.saved[p.key] = p.used;
+    const at = Monitor.place(p);
+    this.saved[at] = Math.max(this.saved[at] || 0, p.used);
+    if (this.saveTimer) return;
+    this.saveTimer = setTimeout(() => this.save(), 5000);
+    if (this.saveTimer.unref) this.saveTimer.unref();
+  }
+
+  save() {
+    clearTimeout(this.saveTimer);
+    this.saveTimer = null;
+    const now = Date.now();
+    for (const [k, t] of Object.entries(this.saved)) if (now - t > KEEP) delete this.saved[k];
+    try {
+      fs.mkdirSync(path.dirname(this.usedFile), { recursive: true });
+      fs.writeFileSync(this.usedFile, JSON.stringify(this.saved));
+    } catch {}
   }
 
   // Returns the notification events produced by this snapshot.
@@ -47,6 +80,7 @@ class Monitor {
         active: raw.windowActive === '1' && raw.paneActive === '1' && raw.attached !== false,
         label: label(raw), title: title(raw, this.hostNames) || p.title || '', bg: raw.bg || null,
       });
+      if (fresh) p.used = this.saved[key] || this.saved[Monitor.place(p)] || 0;
       if (d.kind) p.kind = d.kind;
 
       if (d.state === p.pending) p.count++;
@@ -57,6 +91,7 @@ class Monitor {
         p.state = d.state;
         p.since = now;
         p.used = now; // a turn started, finished or asked something: it's in use
+        this.remember(p);
         // (raw output isn't a sign of use: background timers redraw idle panes)
         if (d.state === 'input') { p.unseen = true; events.push({ type: 'input', key }); }
         else if (d.state === 'idle' && prev === 'working') { p.unseen = true; events.push({ type: 'done', key }); }
@@ -86,7 +121,7 @@ class Monitor {
 
   markSeen(key) {
     const p = this.panes.get(key);
-    if (p) { p.unseen = false; p.used = Date.now(); } // opening, answering or replying is using it
+    if (p) { p.unseen = false; p.used = Date.now(); this.remember(p); } // opening, answering or replying is using it
   }
 
   view() {

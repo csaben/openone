@@ -36,7 +36,11 @@ const embedder = cfg.semantic === false ? null : new Embedder(path.join(require(
 let lastProjects = [];
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const monitor = new Monitor({ hostNames: cfg.hosts.map((h) => h.name) });
+const monitor = new Monitor({
+  hostNames: cfg.hosts.map((h) => h.name),
+  usedFile: cfg.usedFile || path.join(require('os').homedir(), '.local', 'state', 'openone', 'used.json'),
+});
+for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => { if (monitor.saveTimer) monitor.save(); process.exit(0); });
 const hosts = {};
 // agent-to-agent messages; typed into a pane through the same path as a reply
 const bus = new Bus({
