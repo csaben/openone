@@ -82,6 +82,7 @@ class Monitor {
       });
       if (fresh) p.used = this.saved[key] || this.saved[Monitor.place(p)] || 0;
       if (d.kind) p.kind = d.kind;
+      if (p.kind === 'codex' && raw.codexAt) p.activeAt = raw.codexAt;
 
       if (d.state === p.pending) p.count++;
       else { p.pending = d.state; p.count = 1; }

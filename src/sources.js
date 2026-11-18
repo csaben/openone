@@ -197,6 +197,17 @@ class TmuxSource {
       }
       for (const p of all) { const t = this.act.map.get(`${p.session}|${p.paneId}`); if (t) p.activeAt = t; }
     }
+    // and each Codex conversation's last write, by folder (used only if the pane is Codex)
+    if (this.codexActivity) {
+      if (!this.cact || Date.now() - this.cact.at > 15000) {
+        this.cact = { at: Date.now(), map: this.cact ? this.cact.map : new Map() };
+        this.codexActivity().then((m) => { this.cact.map = m; }).catch(() => {});
+      }
+      for (const p of all) {
+        const t = this.cact.map.get(String(p.path || '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase());
+        if (t) p.codexAt = t;
+      }
+    }
     // Claude background sessions run outside tmux; list them too (config "background": false turns it off)
     if (this.cfg.background !== false) {
       if (!this.bg) this.bg = new Background(this);
@@ -376,6 +387,42 @@ class LocalSource extends TmuxSource {
   }
 
   claudeAgents() { return this.claude(['agents', '--json']); }
+
+  // Codex writes each conversation to ~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl as it
+  // works; the first line names its folder -> Map folder (lowercase, /) -> newest write
+  async codexActivity() {
+    const fs = require('fs');
+    const path = require('path');
+    const root = path.join(require('os').homedir(), '.codex', 'sessions');
+    const days = [];
+    for (let i = 0; i < 21; i++) {
+      const d = new Date(Date.now() - i * 86400000);
+      days.push(path.join(root, String(d.getFullYear()), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0')));
+    }
+    if (!this.codexCwd) this.codexCwd = new Map(); // file -> folder (it never changes)
+    const out = new Map();
+    for (const dir of days) {
+      for (const f of await fs.promises.readdir(dir).catch(() => [])) {
+        if (!f.endsWith('.jsonl')) continue;
+        const file = path.join(dir, f);
+        const st = await fs.promises.stat(file).catch(() => null);
+        if (!st) continue;
+        let cwd = this.codexCwd.get(file);
+        if (cwd === undefined) {
+          const fd = await fs.promises.open(file, 'r').catch(() => null);
+          if (!fd) continue;
+          const buf = Buffer.alloc(8192);
+          const { bytesRead } = await fd.read(buf, 0, buf.length, 0).catch(() => ({ bytesRead: 0 }));
+          await fd.close();
+          const m = buf.toString('utf8', 0, bytesRead).match(/"cwd":"((?:[^"\\]|\\.)*)"/);
+          cwd = m ? JSON.parse(`"${m[1]}"`).replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase() : '';
+          this.codexCwd.set(file, cwd);
+        }
+        if (cwd && st.mtimeMs > (out.get(cwd) || 0)) out.set(cwd, st.mtimeMs);
+      }
+    }
+    return out;
+  }
 
   async claudeSessionFiles() {
     const fs = require('fs');
