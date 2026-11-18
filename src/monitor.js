@@ -78,7 +78,7 @@ class Monitor {
         session: raw.session, windowIndex: raw.windowIndex, windowName: raw.windowName,
         paneId: raw.paneId, path: raw.path, command: raw.command,
         active: raw.windowActive === '1' && raw.paneActive === '1' && raw.attached !== false,
-        label: label(raw), title: title(raw, this.hostNames) || p.title || '', bg: raw.bg || null,
+        label: label(raw), title: title(raw, this.hostNames) || p.title || '', bg: raw.bg || null, activeAt: raw.activeAt || 0,
       });
       if (fresh) p.used = this.saved[key] || this.saved[Monitor.place(p)] || 0;
       if (d.kind) p.kind = d.kind;
@@ -90,8 +90,10 @@ class Monitor {
         const prev = p.state;
         p.state = d.state;
         p.since = now;
-        p.used = now; // a turn started, finished or asked something: it's in use
-        this.remember(p);
+        // a turn started, finished or asked something: it's in use. Not a change to or from
+        // "shell": that's a pane being read for the first time (or an agent starting/exiting),
+        // and counting it stamped every agent with openone's start time.
+        if (prev !== 'shell' && d.state !== 'shell') { p.used = now; this.remember(p); }
         // (raw output isn't a sign of use: background timers redraw idle panes)
         if (d.state === 'input') { p.unseen = true; events.push({ type: 'input', key }); }
         else if (d.state === 'idle' && prev === 'working') { p.unseen = true; events.push({ type: 'done', key }); }
@@ -129,7 +131,7 @@ class Monitor {
       key: p.key, host: p.host, session: p.session, windowIndex: p.windowIndex, paneId: p.paneId,
       kind: p.kind || null, state: p.state, label: p.label, title: p.title, active: p.active,
       since: p.since, unseen: p.unseen, question: p.question, topic: p.topic, detail: p.detail, options: p.options,
-      summary: p.summary, doneAt: p.doneAt, path: p.path, bg: p.bg, used: p.used || 0,
+      summary: p.summary, doneAt: p.doneAt, path: p.path, bg: p.bg, used: p.used || 0, activeAt: p.activeAt || 0,
     }));
   }
 }

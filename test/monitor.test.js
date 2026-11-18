@@ -100,3 +100,12 @@ test('last used survives a restart, and a pane with a new id in the same place k
   d.ingest('h', pane(fx('claude-idle-done.txt'), { paneId: '%9', path: '/home/a/Code/other' }));
   assert.equal(d.view()[0].used, 0);
 });
+
+test('a pane read for the first time (shell, then idle) is not counted as used', () => {
+  const m = new Monitor();
+  m.ingest('h', pane(''));
+  m.ingest('h', pane(fx('claude-idle-done.txt')));
+  m.ingest('h', pane(fx('claude-idle-done.txt')));
+  assert.equal(m.view()[0].state, 'idle');
+  assert.equal(m.view()[0].used, 0);
+});

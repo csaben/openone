@@ -14,6 +14,7 @@
 const { execFile, spawn } = require('child_process');
 const { SessionStream, parseClients } = require('./stream');
 const { Background, ID: BG_ID } = require('./bg');
+const { parseClaudeSessions } = require('./activity');
 const resources = require('./resources');
 
 const SEP = '<|>';
@@ -188,6 +189,14 @@ class TmuxSource {
     });
     const keep = new Set(all.map((p) => `${p.session}|${p.paneId}`));
     for (const key of this.cache.keys()) if (!keep.has(key)) this.cache.delete(key);
+    // when each Claude pane last did something, from Claude's own session files (re-read every 15s)
+    if (this.claudeSessionFiles) {
+      if (!this.act || Date.now() - this.act.at > 15000) {
+        this.act = { at: Date.now(), map: this.act ? this.act.map : new Map() };
+        this.claudeSessionFiles().then((t) => { this.act.map = parseClaudeSessions(t); }).catch(() => {});
+      }
+      for (const p of all) { const t = this.act.map.get(`${p.session}|${p.paneId}`); if (t) p.activeAt = t; }
+    }
     // Claude background sessions run outside tmux; list them too (config "background": false turns it off)
     if (this.cfg.background !== false) {
       if (!this.bg) this.bg = new Background(this);
@@ -367,6 +376,13 @@ class LocalSource extends TmuxSource {
   }
 
   claudeAgents() { return this.claude(['agents', '--json']); }
+
+  async claudeSessionFiles() {
+    const fs = require('fs');
+    const dir = require('path').join(require('os').homedir(), '.claude', 'sessions');
+    const names = (await fs.promises.readdir(dir).catch(() => [])).filter((f) => f.endsWith('.json'));
+    return (await Promise.all(names.map((f) => fs.promises.readFile(require('path').join(dir, f), 'utf8').catch(() => '')))).join('\n');
+  }
 
   claudeLogs(id) { return this.claude(['logs', id]); }
 
@@ -599,6 +615,8 @@ class SshTmuxSource extends ShellSource {
 
   async claudeAgents() { return this.exec([this.claudeCmd('agents --json')]); }
 
+  async claudeSessionFiles() { return this.exec(['cat "$HOME"/.claude/sessions/*.json 2>/dev/null; echo']); }
+
   async claudeLogs(id) { return this.exec([this.claudeCmd(`logs ${id}`)]); }
 
   processScript() { return this.exec([resources.SH], 60000); }
@@ -647,6 +665,8 @@ class SshPsmuxSource extends ShellSource {
   async claudeAgents() { return this.clean(await this.exec([`${this.cfg.claude || 'claude'} agents --json 2>nul < NUL`])); }
 
   async claudeLogs(id) { return this.clean(await this.exec([`${this.cfg.claude || 'claude'} logs ${id} 2>nul < NUL`])); }
+
+  async claudeSessionFiles() { return this.clean(await this.exec(['type "%USERPROFILE%\\.claude\\sessions\\*.json" 2>nul'])); }
 
   controlSpawn(session) {
     return spawn(this.ssh, this.sshArgs(`"${this.cfg.psmux || 'psmux'}" -C attach -t ${session}`), { windowsHide: true });

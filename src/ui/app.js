@@ -44,7 +44,10 @@ function doneTime(s) {
   if (d.getTime() > Date.now() + 60000) d.setDate(d.getDate() - 1); // a time later than now was yesterday
   return d.getTime();
 }
-const lastUsed = (p) => (p.state === 'working' ? Date.now() : Math.max(p.used || 0, doneTime(p.doneAt)));
+// activeAt: when Claude's own session record last changed status (known even for turns
+// openone didn't see); the on-screen "done at" has no date, so it's only a fallback
+const lastUsed = (p) => (p.state === 'working' ? Date.now()
+  : Math.max(p.used || 0, p.activeAt || doneTime(p.doneAt)));
 const byPriority = (a, b) => RANK[status(a)] - RANK[status(b)] || lastUsed(b) - lastUsed(a) || b.since - a.since;
 // questions put to you (the openone server's asks) come first, then the agents
 const askItems = () => (S.asks || []).map((a) => ({ key: `ask:${a.id}`, ask: a }));
